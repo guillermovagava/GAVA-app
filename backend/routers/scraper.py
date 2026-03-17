@@ -1,6 +1,6 @@
 """
-Scraper router — runs searches via Yelp, Google Places, or Apollo
-in the background and saves leads to the DB.
+Scraper router — uses Google Places to find businesses and
+Hunter.io (or free web scraper as fallback) to find HR emails.
 """
 import asyncio
 import os
@@ -10,19 +10,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models import Lead, ScrapeJob
-from services.yelp_service import search_businesses as yelp_search, SEASONAL_CATEGORIES
-from services.google_places_service import search_businesses as google_search, GOOGLE_CATEGORIES
-from services.apollo_service import search_companies as apollo_search, enrich_leads_with_hr_contacts, APOLLO_INDUSTRIES
+from services.google_places_service import search_businesses, GOOGLE_CATEGORIES
 
 router = APIRouter()
-
-US_STATES = [
-    "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN",
-    "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV",
-    "NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN",
-    "TX","UT","VT","VA","WA","WV","WI","WY",
-]
-CA_PROVINCES = ["BC","AB","ON","QC","NS","NB","MB","SK","PE","NL"]
 
 STATE_CITIES: dict[str, list[str]] = {
     "FL": ["Miami", "Orlando", "Tampa", "Jacksonville", "Fort Lauderdale"],
@@ -33,41 +23,60 @@ STATE_CITIES: dict[str, list[str]] = {
     "HI": ["Honolulu", "Maui", "Kauai", "Kailua-Kona"],
     "NV": ["Las Vegas", "Reno", "Lake Tahoe"],
     "AZ": ["Phoenix", "Scottsdale", "Sedona", "Tucson"],
+    "WA": ["Seattle", "Spokane", "Bellevue", "Tacoma"],
+    "OR": ["Portland", "Eugene", "Bend", "Salem"],
+    "GA": ["Atlanta", "Savannah", "Augusta", "Macon"],
+    "NC": ["Charlotte", "Raleigh", "Asheville", "Wilmington"],
+    "SC": ["Charleston", "Myrtle Beach", "Hilton Head", "Columbia"],
+    "VA": ["Virginia Beach", "Richmond", "Charlottesville", "Roanoke"],
+    "MI": ["Detroit", "Traverse City", "Grand Rapids", "Ann Arbor"],
+    "MN": ["Minneapolis", "Duluth", "Rochester", "Brainerd"],
+    "WI": ["Milwaukee", "Madison", "Green Bay", "Wisconsin Dells"],
+    "IL": ["Chicago", "Springfield", "Galena", "Rockford"],
+    "PA": ["Philadelphia", "Pittsburgh", "Hershey", "Lancaster"],
+    "MA": ["Boston", "Cape Cod", "Springfield", "Worcester"],
+    "ME": ["Portland", "Bar Harbor", "Kennebunkport", "Bangor"],
+    "NH": ["Manchester", "Portsmouth", "Conway", "Laconia"],
+    "VT": ["Burlington", "Stowe", "Montpelier", "Brattleboro"],
+    # Canada
+    "BC": ["Vancouver", "Victoria", "Whistler", "Kelowna"],
+    "AB": ["Calgary", "Edmonton", "Banff", "Jasper"],
+    "ON": ["Toronto", "Ottawa", "Niagara Falls", "Muskoka"],
+    "QC": ["Montreal", "Quebec City", "Mont-Tremblant"],
 }
 
 
-class QuickScrapeRequest(BaseModel):
-    category_label: str
-    states: list[str]
-    source: str = "yelp"   # "yelp" | "google" | "apollo"
+class ScrapeRequest(BaseModel):
+    category_label: str   # human label from GOOGLE_CATEGORIES
+    states: list[str]     # list of state/province abbreviations
 
 
 @router.get("/categories")
 def get_categories():
-    """Return available categories per source so the UI can show the right options."""
+    return GOOGLE_CATEGORIES
+
+
+@router.get("/status")
+def get_status():
+    """Shows which API keys are configured."""
     return {
-        "yelp":   SEASONAL_CATEGORIES,
-        "google": GOOGLE_CATEGORIES,
-        "apollo": [{"label": i.title(), "query": i} for i in APOLLO_INDUSTRIES],
+        "google_places": bool(os.getenv("GOOGLE_PLACES_API_KEY")),
+        "hunter":        bool(os.getenv("HUNTER_API_KEY")),
+        "email_fallback": True,   # web scraper is always available
     }
 
 
-@router.get("/sources")
-def get_sources():
-    """Which sources are currently configured (have API keys in .env)."""
-    return {
-        "yelp":   bool(os.getenv("YELP_API_KEY")),
-        "google": bool(os.getenv("GOOGLE_PLACES_API_KEY")),
-        "apollo": bool(os.getenv("APOLLO_API_KEY")),
-    }
-
-
-@router.post("/quick")
-async def quick_scrape(
-    payload: QuickScrapeRequest,
+@router.post("/run")
+async def run_scrape(
+    payload: ScrapeRequest,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    cat = next((c for c in GOOGLE_CATEGORIES if c["label"] == payload.category_label), None)
+    if not cat:
+        return {"error": f"Unknown category: {payload.category_label}"}
+
+    # Build city-level location list for better coverage
     locations: list[str] = []
     for state in payload.states:
         cities = STATE_CITIES.get(state, [])
@@ -77,7 +86,7 @@ async def quick_scrape(
             locations.append(state)
 
     job = ScrapeJob(
-        category=f"[{payload.source.upper()}] {payload.category_label}",
+        category=payload.category_label,
         location=", ".join(payload.states),
         status="pending",
     )
@@ -85,13 +94,7 @@ async def quick_scrape(
     db.commit()
     db.refresh(job)
 
-    background.add_task(
-        _scrape_task,
-        job.id,
-        payload.source,
-        payload.category_label,
-        locations,
-    )
+    background.add_task(_scrape_task, job.id, cat["query"], locations)
     return {"job_id": job.id, "status": "started", "locations_queued": len(locations)}
 
 
@@ -114,7 +117,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
 LEAD_COLUMNS = {c.name for c in Lead.__table__.columns}
 
 
-async def _scrape_task(job_id: int, source: str, category_label: str, locations: list[str]):
+async def _scrape_task(job_id: int, query: str, locations: list[str]):
     db = SessionLocal()
     try:
         job = db.query(ScrapeJob).filter(ScrapeJob.id == job_id).first()
@@ -125,72 +128,26 @@ async def _scrape_task(job_id: int, source: str, category_label: str, locations:
         db.commit()
 
         total_saved = 0
+        for location in locations:
+            try:
+                results = await search_businesses(query, location, max_results=20)
+            except Exception:
+                continue
 
-        # ── Yelp ─────────────────────────────────────────────────────────────
-        if source == "yelp":
-            from services.yelp_service import SEASONAL_CATEGORIES as YELP_CATS
-            cat = next((c for c in YELP_CATS if c["label"] == category_label), None)
-            yelp_key = cat["yelp"] if cat else category_label.lower()
-            for location in locations:
-                try:
-                    results = await yelp_search(yelp_key, location, limit=50)
-                except Exception:
+            for biz in results:
+                # Deduplicate by name + city
+                exists = db.query(Lead).filter(
+                    Lead.business_name == biz.get("business_name"),
+                    Lead.city == biz.get("city"),
+                ).first()
+                if exists:
                     continue
-                for biz in results:
-                    yelp_id = biz.get("yelp_id")
-                    if yelp_id and db.query(Lead).filter(Lead.yelp_id == yelp_id).first():
-                        continue
-                    lead = Lead(**{k: v for k, v in biz.items() if k in LEAD_COLUMNS})
-                    db.add(lead)
-                    total_saved += 1
-                db.commit()
-                await asyncio.sleep(0.5)
+                lead = Lead(**{k: v for k, v in biz.items() if k in LEAD_COLUMNS})
+                db.add(lead)
+                total_saved += 1
 
-        # ── Google Places ─────────────────────────────────────────────────────
-        elif source == "google":
-            from services.google_places_service import GOOGLE_CATEGORIES as G_CATS
-            cat = next((c for c in G_CATS if c["label"] == category_label), None)
-            query = cat["query"] if cat else category_label
-            for location in locations:
-                try:
-                    results = await google_search(query, location, max_results=20)
-                except Exception:
-                    continue
-                for biz in results:
-                    # Dedup by business name + city (Google has no stable ID in free tier)
-                    exists = db.query(Lead).filter(
-                        Lead.business_name == biz.get("business_name"),
-                        Lead.city == biz.get("city"),
-                    ).first()
-                    if exists:
-                        continue
-                    lead = Lead(**{k: v for k, v in biz.items() if k in LEAD_COLUMNS})
-                    db.add(lead)
-                    total_saved += 1
-                db.commit()
-                await asyncio.sleep(2)  # Google Places requires delay between pages
-
-        # ── Apollo.io ─────────────────────────────────────────────────────────
-        elif source == "apollo":
-            industry = category_label.lower()
-            for location in locations:
-                try:
-                    results = await apollo_search(industry, location, per_page=25)
-                    results = await enrich_leads_with_hr_contacts(results)
-                except Exception:
-                    continue
-                for biz in results:
-                    exists = db.query(Lead).filter(
-                        Lead.business_name == biz.get("business_name"),
-                        Lead.city == biz.get("city"),
-                    ).first()
-                    if exists:
-                        continue
-                    lead = Lead(**{k: v for k, v in biz.items() if k in LEAD_COLUMNS})
-                    db.add(lead)
-                    total_saved += 1
-                db.commit()
-                await asyncio.sleep(1)
+            db.commit()
+            await asyncio.sleep(2)  # respect API rate limits
 
         job.status = "done"
         job.leads_found = total_saved
@@ -210,13 +167,13 @@ async def _scrape_task(job_id: int, source: str, category_label: str, locations:
 
 def _serialize_job(job: ScrapeJob) -> dict:
     return {
-        "id": job.id,
-        "category": job.category,
-        "location": job.location,
-        "status": job.status,
+        "id":          job.id,
+        "category":    job.category,
+        "location":    job.location,
+        "status":      job.status,
         "leads_found": job.leads_found,
-        "error": job.error,
-        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "error":       job.error,
+        "started_at":  job.started_at.isoformat()  if job.started_at  else None,
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
-        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "created_at":  job.created_at.isoformat()  if job.created_at  else None,
     }
