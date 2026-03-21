@@ -59,7 +59,8 @@ echo.
 echo ============================================================
 echo  NEXT STEPS:
 echo  1. Open the file ".env" in Notepad and fill in your keys:
-echo     - YELP_API_KEY
+echo     - GOOGLE_PLACES_API_KEY
+echo     - HUNTER_API_KEY
 echo     - ANTHROPIC_API_KEY
 echo     - GMAIL_ADDRESS
 echo     - GMAIL_APP_PASSWORD
