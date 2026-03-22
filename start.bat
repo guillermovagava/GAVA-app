@@ -12,7 +12,7 @@ IF NOT EXIST .env (
 )
 
 echo Starting backend server...
-start "GAVA Backend" cmd /k "cd backend && set PYTHONPATH=%CD% && uvicorn main:app --reload --port 8000"
+start "GAVA Backend" cmd /k "cd backend && set PYTHONPATH=%CD% && py -3.12 -m uvicorn main:app --reload --port 8000"
 
 timeout /t 2 /nobreak >nul
 
