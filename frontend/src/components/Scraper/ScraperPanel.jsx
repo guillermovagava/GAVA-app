@@ -9,6 +9,7 @@ const US_STATES = [
   'TX','UT','VT','VA','WA','WV','WI','WY',
 ]
 const CA_PROVINCES = ['BC','AB','ON','QC','NS','NB','MB','SK','PE','NL']
+const AU_STATES = ['NSW','VIC','QLD','WA','SA','TAS','NT','ACT']
 
 export default function ScraperPanel({ showToast }) {
   const [categories, setCategories] = useState([])
@@ -17,6 +18,8 @@ export default function ScraperPanel({ showToast }) {
   const [selectedStates, setSelectedStates] = useState([])
   const [jobs, setJobs] = useState([])
   const [running, setRunning] = useState(false)
+  const [resultsPerCity, setResultsPerCity] = useState(20)
+  const [hunterCredits, setHunterCredits] = useState(5)
   const pollRef = useRef(null)
 
   useEffect(() => {
@@ -62,7 +65,7 @@ export default function ScraperPanel({ showToast }) {
     setRunning(true)
     try {
       for (const cat of selectedCats) {
-        await axios.post('/api/scraper/run', { category_label: cat, states: selectedStates })
+        await axios.post('/api/scraper/run', { category_label: cat, states: selectedStates, max_results_per_city: resultsPerCity })
       }
       showToast(`Started ${selectedCats.length} search job${selectedCats.length > 1 ? 's' : ''}`, 'success')
       loadJobs()
@@ -130,7 +133,7 @@ export default function ScraperPanel({ showToast }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <label className="form-label" style={{ marginBottom: 0 }}>States &amp; Provinces</label>
             <div style={{ display: 'flex', gap: 6 }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => setSelectedStates([...US_STATES, ...CA_PROVINCES])}>All</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setSelectedStates([...US_STATES, ...CA_PROVINCES, ...AU_STATES])}>All</button>
               <button className="btn btn-secondary btn-sm" onClick={() => setSelectedStates([])}>Clear</button>
             </div>
           </div>
@@ -145,6 +148,58 @@ export default function ScraperPanel({ showToast }) {
             {CA_PROVINCES.map(s => (
               <span key={s} className={`state-tag${selectedStates.includes(s) ? ' selected' : ''}`} onClick={() => toggleState(s)}>{s}</span>
             ))}
+          </div>
+          <div style={{ marginBottom: 5, fontSize: 11, color: 'var(--text-dim)' }}>Australia</div>
+          <div className="state-grid">
+            {AU_STATES.map(s => (
+              <span key={s} className={`state-tag${selectedStates.includes(s) ? ' selected' : ''}`} onClick={() => toggleState(s)}>{s}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Hunter.io credit slider — only show if Hunter is connected */}
+        {status.hunter && (
+          <div style={{
+            background: 'var(--surface)', border: '1px solid #92400e',
+            borderRadius: 10, padding: '12px 16px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Hunter.io credits for this search</span>
+              <span style={{
+                fontWeight: 700, fontSize: 15, color: '#f59e0b',
+                background: '#451a03', borderRadius: 6, padding: '2px 10px',
+              }}>
+                {hunterCredits === 0 ? 'None (free scraper only)' : `${hunterCredits} credit${hunterCredits !== 1 ? 's' : ''}`}
+              </span>
+            </div>
+            <input
+              type="range" min={0} max={25} step={1}
+              value={hunterCredits}
+              onChange={e => setHunterCredits(Number(e.target.value))}
+              style={{ width: '100%', accentColor: '#f59e0b' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+              <span>0 — Free scraper only</span>
+              <span style={{ color: '#f59e0b' }}>
+                {hunterCredits > 0
+                  ? `Uses ${hunterCredits} of your 25 monthly credits → better contact names & verified emails`
+                  : 'Scans company websites for free — slower but unlimited'}
+              </span>
+              <span>25</span>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="form-label">Results per city: <strong style={{color:'var(--gold)'}}>{resultsPerCity}</strong></label>
+          <input
+            type="range" min={20} max={60} step={20}
+            value={resultsPerCity}
+            onChange={e => setResultsPerCity(Number(e.target.value))}
+            style={{ width: '100%', accentColor: 'var(--gold)' }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>
+            <span>20 — quick</span><span>40 — balanced</span><span>60 — thorough</span>
           </div>
         </div>
 

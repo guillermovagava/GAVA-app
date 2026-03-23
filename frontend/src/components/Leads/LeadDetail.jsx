@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getLead, updateLead, deleteLead } from '../../api/client'
+import { getLead, updateLead, deleteLead, findEmailHunter, exportLeads } from '../../api/client'
 import EmailCompose from '../Email/EmailCompose'
 
 const STATUSES = ['new', 'contacted', 'replied', 'meeting_booked', 'converted']
@@ -10,6 +10,7 @@ export default function LeadDetail({ leadId, onClose, onDeleted, onUpdated, show
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [findingEmail, setFindingEmail] = useState(false)
 
   useEffect(() => {
     if (!leadId) return
@@ -38,6 +39,19 @@ export default function LeadDetail({ leadId, onClose, onDeleted, onUpdated, show
       showToast('Failed to save', 'error')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleFindEmail() {
+    setFindingEmail(true)
+    try {
+      const result = await findEmailHunter(lead.id)
+      setLead(l => ({ ...l, email: result.email, contact_name: result.contact_name || l.contact_name, email_source: result.source }))
+      showToast(`Email found via ${result.source}: ${result.email}`, 'success')
+    } catch (e) {
+      showToast(e.response?.data?.detail || 'No email found', 'error')
+    } finally {
+      setFindingEmail(false)
     }
   }
 
@@ -196,9 +210,16 @@ export default function LeadDetail({ leadId, onClose, onDeleted, onUpdated, show
               )}
             </div>
 
-            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8 }}>
-              Added {lead.created_at ? new Date(lead.created_at).toLocaleDateString() : '—'} &middot; Source: {lead.source || 'manual'}
-              {lead.last_contacted && ` · Last contacted ${new Date(lead.last_contacted).toLocaleDateString()}`}
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>Added {lead.created_at ? new Date(lead.created_at).toLocaleDateString() : '—'}</span>
+              <span>·</span>
+              <span>Source: {lead.source || 'manual'}</span>
+              {lead.last_contacted && <><span>·</span><span>Last contacted {new Date(lead.last_contacted).toLocaleDateString()}</span></>}
+              {lead.score !== undefined && (
+                <span style={{ marginLeft: 'auto', color: 'var(--gold)', fontWeight: 600 }}>
+                  Score: {lead.score}/10
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -239,7 +260,26 @@ export default function LeadDetail({ leadId, onClose, onDeleted, onUpdated, show
         ) : (
           <>
             <button className="btn btn-secondary" onClick={() => setEditing(true)}>Edit</button>
-            <button className="btn btn-danger btn-sm" style={{ marginLeft: 'auto' }} onClick={handleDelete}>
+            {!lead.email && lead.website && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleFindEmail}
+                disabled={findingEmail}
+                title="Search Hunter.io or website for HR email"
+                style={{ color: 'var(--gold)', borderColor: 'var(--gold-dim)' }}
+              >
+                {findingEmail ? <><span className="spinner" style={{width:12,height:12}}/> Searching...</> : '🔍 Find Email'}
+              </button>
+            )}
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => exportLeads({ lead_id: lead.id })}
+              title="Export this lead to Excel"
+              style={{ marginLeft: 'auto' }}
+            >
+              ↓ Excel
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={handleDelete}>
               Delete
             </button>
           </>

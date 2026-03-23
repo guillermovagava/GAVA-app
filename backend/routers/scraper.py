@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models import Lead, ScrapeJob
 from services.google_places_service import search_businesses, GOOGLE_CATEGORIES
-from services.hunter_quota import get_status as hunter_quota_status
 
 router = APIRouter()
 
@@ -44,12 +43,23 @@ STATE_CITIES: dict[str, list[str]] = {
     "AB": ["Calgary", "Edmonton", "Banff", "Jasper"],
     "ON": ["Toronto", "Ottawa", "Niagara Falls", "Muskoka"],
     "QC": ["Montreal", "Quebec City", "Mont-Tremblant"],
+    # Australia
+    "NSW": ["Sydney", "Newcastle", "Wollongong", "Byron Bay", "Port Macquarie"],
+    "VIC": ["Melbourne", "Geelong", "Ballarat", "Bendigo", "Mornington"],
+    "QLD": ["Brisbane", "Gold Coast", "Cairns", "Townsville", "Noosa", "Whitsundays"],
+    "WA":  ["Perth", "Fremantle", "Broome", "Margaret River", "Exmouth"],
+    "SA":  ["Adelaide", "Port Augusta", "Kangaroo Island", "Barossa Valley"],
+    "TAS": ["Hobart", "Launceston", "Cradle Mountain", "Freycinet"],
+    "NT":  ["Darwin", "Alice Springs", "Kakadu"],
+    "ACT": ["Canberra"],
 }
 
 
 class ScrapeRequest(BaseModel):
-    category_label: str   # human label from GOOGLE_CATEGORIES
-    states: list[str]     # list of state/province abbreviations
+    category_label: str       # human label from GOOGLE_CATEGORIES
+    states: list[str]         # list of state/province abbreviations
+    hunter_credits: int = 5   # max Hunter.io credits to spend on this job (0 = none)
+    max_results_per_city: int = 20   # 20, 40, or 60
 
 
 @router.get("/categories")
@@ -59,16 +69,11 @@ def get_categories():
 
 @router.get("/status")
 def get_status():
-    """Shows which API keys are configured and Hunter.io quota."""
-    quota = hunter_quota_status()
+    """Shows which API keys are configured."""
     return {
-        "google_places":   bool(os.getenv("GOOGLE_PLACES_API_KEY")),
-        "hunter":          bool(os.getenv("HUNTER_API_KEY")),
-        "email_fallback":  True,
-        "hunter_used":     quota["used"],
-        "hunter_limit":    quota["limit"],
-        "hunter_remaining": quota["remaining"],
-        "hunter_month":    quota["month"],
+        "google_places": bool(os.getenv("GOOGLE_PLACES_API_KEY")),
+        "hunter":        bool(os.getenv("HUNTER_API_KEY")),
+        "email_fallback": True,   # web scraper is always available
     }
 
 
@@ -100,7 +105,7 @@ async def run_scrape(
     db.commit()
     db.refresh(job)
 
-    background.add_task(_scrape_task, job.id, cat["query"], locations)
+    background.add_task(_scrape_task, job.id, cat["query"], locations, payload.hunter_credits, payload.max_results_per_city)
     return {"job_id": job.id, "status": "started", "locations_queued": len(locations)}
 
 
@@ -123,7 +128,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
 LEAD_COLUMNS = {c.name for c in Lead.__table__.columns}
 
 
-async def _scrape_task(job_id: int, query: str, locations: list[str]):
+async def _scrape_task(job_id: int, query: str, locations: list[str], hunter_credits: int = 5, payload_max_results: int = 20):
     db = SessionLocal()
     try:
         job = db.query(ScrapeJob).filter(ScrapeJob.id == job_id).first()
@@ -134,9 +139,17 @@ async def _scrape_task(job_id: int, query: str, locations: list[str]):
         db.commit()
 
         total_saved = 0
+        # Mutable counter shared across all location searches in this job
+        hunter_used = [0]
+
         for location in locations:
             try:
-                results = await search_businesses(query, location, max_results=20)
+                results = await search_businesses(
+                    query, location,
+                    max_results=payload_max_results,
+                    hunter_budget=hunter_credits,
+                    hunter_used=hunter_used,
+                )
             except Exception:
                 continue
 

@@ -5,7 +5,12 @@
       "Bash(cmd /c \"gh --version\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(BASE=\"/c/Users/User/OneDrive/Personal/GAVA Recruiting/GAVA-app-claude-kind-snyder/GAVA-app-claude-kind-snyder\")",
+      "Bash(WT=\"/c/Users/User/GAVA-app/.claude/worktrees/kind-snyder\")",
+      "Bash(__NEW_LINE_8e0858a0a3f63f15__ cp:*)",
+      "Bash(cp \"$BASE/backend/routers/scraper.py\" \"$WT/backend/routers/scraper.py\")",
+      "Bash(cp \"$BASE/backend/requirements.txt\" \"$WT/backend/requirements.txt\")"
     ]
   }
 }
