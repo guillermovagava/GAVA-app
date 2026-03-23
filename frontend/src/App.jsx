@@ -56,8 +56,16 @@ export default function App() {
   return (
     <div className="app">
       {/* Header */}
-      <header className="header">
-        <span className="header-logo">GAVA Recruitment</span>
+      <header className="header" style={{ position: 'relative' }}>
+        {/* Logo wordmark */}
+        <div className="header-logo">
+          <div>
+            <div className="header-logo-wordmark">G<span>∧</span>V<span>∧</span></div>
+            <span className="header-logo-sub">recruiting</span>
+          </div>
+        </div>
+
+        <div className="header-divider" />
 
         <nav className="header-nav">
           <button
@@ -76,19 +84,24 @@ export default function App() {
 
         {stats && (
           <div className="header-stats">
-            <div className="stat-pill"><strong>{stats.total}</strong> Leads</div>
-            {stats.by_status?.new > 0 &&
+            <div className="stat-pill">
+              <strong>{stats.total}</strong> leads
+            </div>
+            {stats.by_status?.new > 0 && (
               <div className="stat-pill" style={{ color: 'var(--new)' }}>
-                <strong>{stats.by_status.new}</strong> New
-              </div>}
-            {stats.by_status?.contacted > 0 &&
-              <div className="stat-pill" style={{ color: 'var(--contacted)' }}>
-                <strong>{stats.by_status.contacted}</strong> Contacted
-              </div>}
-            {stats.by_status?.converted > 0 &&
+                <strong>{stats.by_status.new}</strong> new
+              </div>
+            )}
+            {stats.by_status?.contacted > 0 && (
+              <div className="stat-pill" style={{ color: 'var(--gold)' }}>
+                <strong>{stats.by_status.contacted}</strong> contacted
+              </div>
+            )}
+            {stats.by_status?.converted > 0 && (
               <div className="stat-pill" style={{ color: 'var(--converted)' }}>
-                <strong>{stats.by_status.converted}</strong> Converted
-              </div>}
+                <strong>{stats.by_status.converted}</strong> converted
+              </div>
+            )}
           </div>
         )}
       </header>
