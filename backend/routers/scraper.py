@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models import Lead, ScrapeJob
 from services.google_places_service import search_businesses, GOOGLE_CATEGORIES
+from services.hunter_quota import get_status as hunter_quota_status
 
 router = APIRouter()
 
@@ -58,11 +59,16 @@ def get_categories():
 
 @router.get("/status")
 def get_status():
-    """Shows which API keys are configured."""
+    """Shows which API keys are configured and Hunter.io quota."""
+    quota = hunter_quota_status()
     return {
-        "google_places": bool(os.getenv("GOOGLE_PLACES_API_KEY")),
-        "hunter":        bool(os.getenv("HUNTER_API_KEY")),
-        "email_fallback": True,   # web scraper is always available
+        "google_places":   bool(os.getenv("GOOGLE_PLACES_API_KEY")),
+        "hunter":          bool(os.getenv("HUNTER_API_KEY")),
+        "email_fallback":  True,
+        "hunter_used":     quota["used"],
+        "hunter_limit":    quota["limit"],
+        "hunter_remaining": quota["remaining"],
+        "hunter_month":    quota["month"],
     }
 
 

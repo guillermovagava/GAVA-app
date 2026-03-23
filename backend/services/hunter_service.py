@@ -11,6 +11,7 @@ Docs: https://hunter.io/api-documentation
 import os
 import httpx
 from typing import Optional
+from services.hunter_quota import can_use, increment
 
 HUNTER_BASE = "https://api.hunter.io/v2"
 
@@ -24,9 +25,14 @@ async def find_hr_contact(domain: str) -> dict:
 
     Falls back to the first available email if no HR-specific one is found.
     Consumes 1 Hunter.io search credit per call.
+    Automatically stops calling Hunter.io when monthly quota is reached.
     """
     api_key = os.getenv("HUNTER_API_KEY", "")
     if not api_key or not domain:
+        return {}
+
+    # Stop if monthly free quota is used up — fall back to web scraper
+    if not can_use():
         return {}
 
     # Strip protocol and path — Hunter.io wants just the domain
@@ -48,6 +54,9 @@ async def find_hr_contact(domain: str) -> dict:
     emails = data.get("data", {}).get("emails", [])
     if not emails:
         return {}
+
+    # Count this as a used credit
+    increment()
 
     # Score each email: higher = more likely to be HR/recruitment
     def score(entry: dict) -> int:
