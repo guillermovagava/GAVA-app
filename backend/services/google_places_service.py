@@ -1,12 +1,6 @@
 """
-Google Places API (New) integration.
-Uses the next-generation Places API (200M+ places, more accurate data).
-Docs: https://developers.google.com/maps/documentation/places/web-service/text-search
-
-Flow per business found:
-  1. Text Search  → list of matching places
-  2. Place Details → phone + website
-  3. Hunter.io or free web scraper → HR email + contact name
+Google Places API (New) — finds businesses then enriches with HR emails.
+Hunter.io credits are budgeted per job so you never spend more than you choose.
 """
 import os
 import asyncio
@@ -14,7 +8,6 @@ import httpx
 from services.hunter_service import find_hr_contact as hunter_find
 from services.web_scraper import find_hr_email as scrape_find
 
-# New Places API base (v1)
 PLACES_NEW_BASE = "https://places.googleapis.com/v1"
 
 GOOGLE_CATEGORIES = [
@@ -33,40 +26,55 @@ GOOGLE_CATEGORIES = [
 ]
 
 
-async def _find_email(website: str | None) -> tuple[str | None, str | None, str | None]:
+async def _find_email(
+    website: str | None,
+    hunter_budget: int,
+    hunter_used: list,          # list with one int — acts as mutable counter
+) -> tuple[str | None, str | None, str | None]:
     """
     Returns (email, contact_name, position).
-    Tries Hunter.io first (1 credit), falls back to free web scraper.
+    Uses Hunter.io only if budget allows, otherwise falls back to free web scraper.
+    hunter_used[0] is incremented each time Hunter.io is called.
     """
     if not website:
         return None, None, None
 
-    if os.getenv("HUNTER_API_KEY"):
+    # Use Hunter.io only if key is set AND we still have budget for this job
+    if os.getenv("HUNTER_API_KEY") and hunter_used[0] < hunter_budget:
         result = await hunter_find(website)
         if result.get("email"):
+            hunter_used[0] += 1
             return result["email"], result.get("contact_name"), result.get("position")
 
+    # Free fallback — no credit used
     email = await scrape_find(website)
     return email, None, None
 
 
-async def search_businesses(query: str, location: str, max_results: int = 20) -> list[dict]:
+async def search_businesses(
+    query: str,
+    location: str,
+    max_results: int = 20,
+    hunter_budget: int = 5,
+    hunter_used: list | None = None,
+) -> list[dict]:
     """
-    Search Places API (New) for businesses matching `query` in `location`.
-    Returns a list of enriched lead dicts ready to store in the database.
+    Search Google Places (New API) for businesses and enrich with contact info.
+    hunter_budget = max Hunter.io credits to spend across ALL calls sharing hunter_used.
     """
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
     if not api_key:
         return []
 
+    if hunter_used is None:
+        hunter_used = [0]
+
     results: list[dict] = []
     next_page_token: str | None = None
 
-    # Headers required by the New Places API
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
-        # Fields we want back from Text Search
         "X-Goog-FieldMask": (
             "places.id,"
             "places.displayName,"
@@ -99,22 +107,20 @@ async def search_businesses(query: str, location: str, max_results: int = 20) ->
             except Exception:
                 break
 
-            for place in data.get("places", []):
-                if len(results) >= max_results:
-                    break
+            places = data.get("places", [])[:max_results - len(results)]
 
+            # Enrich all places in this page concurrently — much faster
+            async def enrich(place):
                 website = place.get("websiteUri")
                 phone   = place.get("nationalPhoneNumber")
                 addr    = place.get("formattedAddress", "")
                 name    = place.get("displayName", {}).get("text", "")
                 loc     = place.get("location", {})
-                lat     = loc.get("latitude")
-                lng     = loc.get("longitude")
-
                 city, state, country = _parse_address(addr)
-                email, contact_name, position = await _find_email(website)
-
-                results.append({
+                email, contact_name, position = await _find_email(
+                    website, hunter_budget, hunter_used
+                )
+                return {
                     "business_name": name,
                     "category":      query,
                     "phone":         phone,
@@ -125,27 +131,29 @@ async def search_businesses(query: str, location: str, max_results: int = 20) ->
                     "city":          city,
                     "state":         state,
                     "country":       country,
-                    "lat":           lat,
-                    "lng":           lng,
+                    "lat":           loc.get("latitude"),
+                    "lng":           loc.get("longitude"),
                     "source":        "google",
-                })
+                }
+
+            enriched = await asyncio.gather(*[enrich(p) for p in places])
+            results.extend(enriched)
 
             next_page_token = data.get("nextPageToken")
             if not next_page_token:
                 break
-            await asyncio.sleep(2)  # brief pause between pages
+            await asyncio.sleep(2)
 
     return results
 
 
 def _parse_address(addr: str) -> tuple[str, str, str]:
-    """Best-effort city/state/country extraction from a formatted address."""
     parts = [p.strip() for p in addr.split(",")]
     city, state, country = "", "", "US"
     if parts:
         city = parts[0]
     if len(parts) >= 2:
         state = parts[1].strip().split()[0]
-    if len(parts) >= 1 and ("Canada" in addr or "Canada" in parts[-1]):
+    if "Canada" in addr:
         country = "CA"
     return city, state, country
