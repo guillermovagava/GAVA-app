@@ -58,6 +58,7 @@ STATE_CITIES: dict[str, list[str]] = {
 class ScrapeRequest(BaseModel):
     category_label: str
     states: list[str] = []
+    selected_cities: list[str] = []    # if non-empty, only search these cities within the selected states
     custom_locations: list[str] = []   # e.g. ["Miami Beach, FL", "Aspen, CO"]
     hunter_credits: int = 5   # max Hunter.io credits to spend on this job (0 = none)
     max_results_per_city: int = 20
@@ -66,6 +67,12 @@ class ScrapeRequest(BaseModel):
 @router.get("/categories")
 def get_categories():
     return GOOGLE_CATEGORIES
+
+
+@router.get("/cities")
+def get_cities():
+    """Returns all known cities grouped by state code."""
+    return STATE_CITIES
 
 
 @router.get("/status")
@@ -91,11 +98,20 @@ async def run_scrape(
     # Build city-level location list
     locations: list[str] = []
     for state in payload.states:
-        cities = STATE_CITIES.get(state, [])
+        all_cities = STATE_CITIES.get(state, [])
+        if payload.selected_cities:
+            # Only use cities the user explicitly chose that belong to this state
+            cities = [c for c in all_cities if c in payload.selected_cities]
+            if not cities:
+                continue  # user selected cities but none match this state — skip
+        else:
+            cities = all_cities  # Any city — use all known cities for this state
+
         if cities:
             locations.extend([f"{city}, {state}" for city in cities])
         else:
-            locations.append(state)
+            locations.append(state)  # state has no known cities, search state-level
+
     # Add custom locations directly
     for loc in payload.custom_locations:
         if loc.strip() and loc.strip() not in locations:

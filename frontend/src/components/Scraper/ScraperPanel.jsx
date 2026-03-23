@@ -17,16 +17,57 @@ const STATES_BY_COUNTRY = {
   AU: ['NSW','VIC','QLD','WA','SA','TAS','NT','ACT'],
 }
 
+// Mirror of backend STATE_CITIES — cities known per state
+const CITIES_BY_STATE = {
+  FL:  ['Miami','Orlando','Tampa','Jacksonville','Fort Lauderdale'],
+  CA:  ['Los Angeles','San Francisco','San Diego','Sacramento','Anaheim'],
+  NY:  ['New York City','Buffalo','Albany','Rochester','Syracuse'],
+  TX:  ['Houston','Dallas','Austin','San Antonio','El Paso'],
+  CO:  ['Denver','Colorado Springs','Aspen','Vail','Breckenridge'],
+  HI:  ['Honolulu','Maui','Kauai','Kailua-Kona'],
+  NV:  ['Las Vegas','Reno','Lake Tahoe'],
+  AZ:  ['Phoenix','Scottsdale','Sedona','Tucson'],
+  WA:  ['Seattle','Spokane','Bellevue','Tacoma'],
+  OR:  ['Portland','Eugene','Bend','Salem'],
+  GA:  ['Atlanta','Savannah','Augusta','Macon'],
+  NC:  ['Charlotte','Raleigh','Asheville','Wilmington'],
+  SC:  ['Charleston','Myrtle Beach','Hilton Head','Columbia'],
+  VA:  ['Virginia Beach','Richmond','Charlottesville','Roanoke'],
+  MI:  ['Detroit','Traverse City','Grand Rapids','Ann Arbor'],
+  MN:  ['Minneapolis','Duluth','Rochester','Brainerd'],
+  WI:  ['Milwaukee','Madison','Green Bay','Wisconsin Dells'],
+  IL:  ['Chicago','Springfield','Galena','Rockford'],
+  PA:  ['Philadelphia','Pittsburgh','Hershey','Lancaster'],
+  MA:  ['Boston','Cape Cod','Springfield','Worcester'],
+  ME:  ['Portland','Bar Harbor','Kennebunkport','Bangor'],
+  NH:  ['Manchester','Portsmouth','Conway','Laconia'],
+  VT:  ['Burlington','Stowe','Montpelier','Brattleboro'],
+  // Canada
+  BC:  ['Vancouver','Victoria','Whistler','Kelowna'],
+  AB:  ['Calgary','Edmonton','Banff','Jasper'],
+  ON:  ['Toronto','Ottawa','Niagara Falls','Muskoka'],
+  QC:  ['Montreal','Quebec City','Mont-Tremblant'],
+  // Australia
+  NSW: ['Sydney','Newcastle','Wollongong','Byron Bay','Port Macquarie'],
+  VIC: ['Melbourne','Geelong','Ballarat','Bendigo','Mornington'],
+  QLD: ['Brisbane','Gold Coast','Cairns','Townsville','Noosa','Whitsundays'],
+  SA:  ['Adelaide','Port Augusta','Kangaroo Island','Barossa Valley'],
+  TAS: ['Hobart','Launceston','Cradle Mountain','Freycinet'],
+  NT:  ['Darwin','Alice Springs','Kakadu'],
+  ACT: ['Canberra'],
+}
+
 export default function ScraperPanel({ showToast }) {
-  const [categories, setCategories]         = useState([])
-  const [status, setStatus]                 = useState({ google_places: false, hunter: false })
-  const [selectedCats, setSelectedCats]     = useState([])
+  const [categories, setCategories]               = useState([])
+  const [status, setStatus]                       = useState({ google_places: false, hunter: false })
+  const [selectedCats, setSelectedCats]           = useState([])
   const [selectedCountries, setSelectedCountries] = useState(['US'])
-  const [selectedStates, setSelectedStates] = useState([])
-  const [customCities, setCustomCities]     = useState('')   // free-text cities
-  const [resultsPerCity, setResultsPerCity] = useState(20)
-  const [jobs, setJobs]                     = useState([])
-  const [running, setRunning]               = useState(false)
+  const [selectedStates, setSelectedStates]       = useState([])
+  const [selectedCities, setSelectedCities]       = useState([])  // empty = any city
+  const [customCities, setCustomCities]           = useState('')
+  const [resultsPerCity, setResultsPerCity]       = useState(20)
+  const [jobs, setJobs]                           = useState([])
+  const [running, setRunning]                     = useState(false)
   const pollRef = useRef(null)
 
   useEffect(() => {
@@ -51,30 +92,40 @@ export default function ScraperPanel({ showToast }) {
   function toggleCountry(code) {
     setSelectedCountries(p => {
       const next = p.includes(code) ? p.filter(c => c !== code) : [...p, code]
-      // Remove states that no longer belong to any selected country
-      setSelectedStates(s => s.filter(st =>
-        next.some(c => STATES_BY_COUNTRY[c]?.includes(st))
-      ))
+      setSelectedStates(s => s.filter(st => next.some(c => STATES_BY_COUNTRY[c]?.includes(st))))
+      setSelectedCities([])
       return next
     })
   }
 
   function toggleState(s) {
-    setSelectedStates(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s])
+    setSelectedStates(p => {
+      const next = p.includes(s) ? p.filter(x => x !== s) : [...p, s]
+      // Remove selected cities that belong to a state that was just deselected
+      setSelectedCities(c => c.filter(city =>
+        next.some(st => (CITIES_BY_STATE[st] || []).includes(city))
+      ))
+      return next
+    })
   }
 
   function selectAllStates() {
-    const all = selectedCountries.flatMap(c => STATES_BY_COUNTRY[c] || [])
-    setSelectedStates(all)
+    setSelectedStates(selectedCountries.flatMap(c => STATES_BY_COUNTRY[c] || []))
+    setSelectedCities([])
   }
 
-  // Parse custom cities text into location strings
+  function toggleCity(city) {
+    setSelectedCities(p => p.includes(city) ? p.filter(x => x !== city) : [...p, city])
+  }
+
+  function selectAllCities() {
+    const all = selectedStates.flatMap(s => CITIES_BY_STATE[s] || [])
+    setSelectedCities(all)
+  }
+
   function parseCustomCities() {
     if (!customCities.trim()) return []
-    return customCities
-      .split('\n')
-      .map(l => l.trim())
-      .filter(l => l.length > 0)
+    return customCities.split('\n').map(l => l.trim()).filter(l => l.length > 0)
   }
 
   async function startScrape() {
@@ -84,23 +135,20 @@ export default function ScraperPanel({ showToast }) {
     if (selectedCats.length === 0) { showToast('Select at least one business type', 'error'); return }
 
     const customLocs = parseCustomCities()
-    const hasStates  = selectedStates.length > 0
-    const hasCities  = customLocs.length > 0
-
-    if (!hasStates && !hasCities) {
+    if (selectedStates.length === 0 && customLocs.length === 0) {
       showToast('Select at least one state or enter a custom city', 'error'); return
     }
 
     setRunning(true)
     try {
       for (const cat of selectedCats) {
-        const payload = {
-          category_label: cat,
-          states: selectedStates,
+        await axios.post('/api/scraper/run', {
+          category_label:   cat,
+          states:           selectedStates,
+          selected_cities:  selectedCities,   // empty = any city in those states
           custom_locations: customLocs,
           max_results_per_city: resultsPerCity,
-        }
-        await axios.post('/api/scraper/run', payload)
+        })
       }
       showToast(`Started ${selectedCats.length} search job${selectedCats.length > 1 ? 's' : ''}`, 'success')
       loadJobs()
@@ -111,9 +159,14 @@ export default function ScraperPanel({ showToast }) {
     }
   }
 
+  // Which states have a known city list
+  const statesWithCities = selectedStates.filter(s => (CITIES_BY_STATE[s] || []).length > 0)
+  const anyCityMode      = selectedCities.length === 0
+  const customLocs       = parseCustomCities()
+
   const visibleStates = selectedCountries.flatMap(c => STATES_BY_COUNTRY[c] || [])
-  const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'pending')
-  const doneJobs   = jobs.filter(j => j.status === 'done'    || j.status === 'failed')
+  const activeJobs    = jobs.filter(j => j.status === 'running' || j.status === 'pending')
+  const doneJobs      = jobs.filter(j => j.status === 'done'    || j.status === 'failed')
 
   return (
     <div className="scraper-panel">
@@ -173,11 +226,11 @@ export default function ScraperPanel({ showToast }) {
               <label className="form-label" style={{ marginBottom: 0 }}>States &amp; Provinces</label>
               <div style={{ display: 'flex', gap: 6 }}>
                 <button className="btn btn-secondary btn-sm" onClick={selectAllStates}>All</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setSelectedStates([])}>Clear</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => { setSelectedStates([]); setSelectedCities([]) }}>Clear</button>
               </div>
             </div>
             {selectedCountries.map(cCode => {
-              const sts = STATES_BY_COUNTRY[cCode] || []
+              const sts   = STATES_BY_COUNTRY[cCode] || []
               if (!sts.length) return null
               const label = COUNTRIES.find(c => c.code === cCode)?.label || cCode
               return (
@@ -197,27 +250,95 @@ export default function ScraperPanel({ showToast }) {
           </div>
         )}
 
-        {/* 4 — Custom cities */}
+        {/* 4 — City picker (only when states with known cities are selected) */}
+        {statesWithCities.length > 0 && (
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 10,
+            padding: '12px 14px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <label className="form-label" style={{ marginBottom: 0 }}>Cities</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {/* Any city button — active when nothing is selected */}
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setSelectedCities([])}
+                  style={{
+                    background: anyCityMode ? 'var(--gold)' : 'var(--surface2)',
+                    color:      anyCityMode ? 'var(--navy)' : 'var(--text-dim)',
+                    border:     `1px solid ${anyCityMode ? 'var(--gold)' : 'var(--border)'}`,
+                    fontWeight: 600,
+                  }}
+                >
+                  Any city
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={selectAllCities}>All</button>
+                {!anyCityMode && (
+                  <button className="btn btn-secondary btn-sm" onClick={() => setSelectedCities([])}>Clear</button>
+                )}
+              </div>
+            </div>
+
+            {anyCityMode && (
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 8 }}>
+                Will search all known cities in the selected states. Click a city below to narrow it down.
+              </div>
+            )}
+
+            {statesWithCities.map(state => (
+              <div key={state} style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 5, fontWeight: 600 }}>
+                  {state}
+                </div>
+                <div className="state-grid">
+                  {(CITIES_BY_STATE[state] || []).map(city => (
+                    <span
+                      key={city}
+                      className={`state-tag${selectedCities.includes(city) ? ' selected' : ''}`}
+                      onClick={() => toggleCity(city)}
+                      style={{ fontSize: 11 }}
+                    >
+                      {city}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            <div style={{ fontSize: 11, color: anyCityMode ? 'var(--text-dim)' : 'var(--gold)', marginTop: 4 }}>
+              {anyCityMode
+                ? `${statesWithCities.flatMap(s => CITIES_BY_STATE[s] || []).length} cities queued`
+                : `${selectedCities.length} city${selectedCities.length !== 1 ? 'ies' : 'y'} selected`}
+            </div>
+          </div>
+        )}
+
+        {/* 5 — Custom cities */}
         <div>
           <label className="form-label">
-            Custom Cities <span style={{ fontWeight: 400, color: 'var(--text-dim)', textTransform: 'none', letterSpacing: 0 }}>(optional — one per line, e.g. "Miami Beach, FL")</span>
+            Custom Cities{' '}
+            <span style={{ fontWeight: 400, color: 'var(--text-dim)', textTransform: 'none', letterSpacing: 0 }}>
+              (optional — one per line, e.g. "Miami Beach, FL")
+            </span>
           </label>
           <textarea
             className="detail-textarea"
-            rows={4}
+            rows={3}
             placeholder={"Miami Beach, FL\nAspen, CO\nWhistler, BC\nGold Coast, QLD"}
             value={customCities}
             onChange={e => setCustomCities(e.target.value)}
             style={{ fontFamily: 'monospace', fontSize: 12 }}
           />
-          {parseCustomCities().length > 0 && (
+          {customLocs.length > 0 && (
             <div style={{ fontSize: 11, color: 'var(--gold)', marginTop: 4 }}>
-              ✓ {parseCustomCities().length} custom location{parseCustomCities().length !== 1 ? 's' : ''} added
+              ✓ {customLocs.length} custom location{customLocs.length !== 1 ? 's' : ''} added
             </div>
           )}
         </div>
 
-        {/* 5 — Results per city */}
+        {/* 6 — Results per city */}
         <div>
           <label className="form-label">Results per city: <strong style={{ color: 'var(--gold)' }}>{resultsPerCity}</strong></label>
           <input type="range" min={20} max={60} step={20} value={resultsPerCity}
@@ -236,14 +357,18 @@ export default function ScraperPanel({ showToast }) {
           <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
             {selectedCats.length} type{selectedCats.length !== 1 ? 's' : ''}
             {selectedStates.length > 0 && ` · ${selectedStates.length} state${selectedStates.length !== 1 ? 's' : ''}`}
-            {parseCustomCities().length > 0 && ` · ${parseCustomCities().length} custom city${parseCustomCities().length !== 1 ? 'ies' : ''}`}
+            {!anyCityMode && ` · ${selectedCities.length} city${selectedCities.length !== 1 ? 'ies' : 'y'}`}
+            {anyCityMode && statesWithCities.length > 0 && ' · any city'}
+            {customLocs.length > 0 && ` · ${customLocs.length} custom`}
           </span>
         </div>
       </div>
 
       {activeJobs.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Running <span className="spinner" style={{ width: 12, height: 12 }} /></div>
+          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+            Running <span className="spinner" style={{ width: 12, height: 12 }} />
+          </div>
           <div className="jobs-list">{activeJobs.map(j => <JobCard key={j.id} job={j} />)}</div>
         </div>
       )}
