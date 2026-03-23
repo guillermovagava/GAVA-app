@@ -57,12 +57,18 @@ export default function App() {
     <div className="app">
       {/* Header */}
       <header className="header" style={{ position: 'relative' }}>
-        {/* Logo wordmark */}
+        {/* Logo */}
         <div className="header-logo">
-          <div>
-            <div className="header-logo-wordmark">G<span>∧</span>V<span>∧</span></div>
-            <span className="header-logo-sub">recruiting</span>
-          </div>
+          <img
+            src="/logo.png"
+            alt="GAVA Recruiting"
+            style={{
+              height: 32,
+              width: 'auto',
+              mixBlendMode: 'screen',   /* removes black bg, keeps white logo */
+              display: 'block',
+            }}
+          />
         </div>
 
         <div className="header-divider" />
