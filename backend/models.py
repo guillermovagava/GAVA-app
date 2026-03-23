@@ -22,7 +22,8 @@ class Lead(Base):
     contact_name = Column(String)
     # new | contacted | replied | meeting_booked | converted
     status = Column(String, default="new")
-    source = Column(String)          # yelp | manual
+    source = Column(String)          # google | manual
+    email_source = Column(String)    # hunter | scraper | None
     notes = Column(Text)
     yelp_id = Column(String, unique=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

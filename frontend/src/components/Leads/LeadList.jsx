@@ -86,9 +86,32 @@ export default function LeadList({ selectedId, onSelect }) {
               <span>{lead.city}{lead.state ? `, ${lead.state}` : ''}</span>
               <span className={`status-badge status-${lead.status}`}>{lead.status?.replace('_', ' ')}</span>
             </div>
-            {lead.category && (
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 3 }}>{lead.category}</div>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+              {lead.category && (
+                <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{lead.category}</span>
+              )}
+              {lead.email_source === 'hunter' && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '1px 5px',
+                  borderRadius: 4, background: '#1e3a5f', color: '#60a5fa',
+                  letterSpacing: '0.3px'
+                }}>HUNTER</span>
+              )}
+              {lead.email_source === 'scraper' && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '1px 5px',
+                  borderRadius: 4, background: '#1a3a2a', color: '#4ade80',
+                  letterSpacing: '0.3px'
+                }}>FREE</span>
+              )}
+              {!lead.email && (
+                <span style={{
+                  fontSize: 10, fontWeight: 700, padding: '1px 5px',
+                  borderRadius: 4, background: '#3a1a1a', color: '#f87171',
+                  letterSpacing: '0.3px'
+                }}>NO EMAIL</span>
+              )}
+            </div>
           </div>
         ))}
       </div>

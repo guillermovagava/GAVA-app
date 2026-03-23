@@ -127,9 +127,23 @@ export default function LeadDetail({ leadId, onClose, onDeleted, onUpdated, show
               ) : (
                 <>
                   <InfoRow label="Contact" value={lead.contact_name || '—'} />
-                  <InfoRow label="Email" value={lead.email
-                    ? <a href={`mailto:${lead.email}`}>{lead.email}</a>
-                    : '—'} />
+                  <InfoRow label="Email" value={lead.email ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <a href={`mailto:${lead.email}`}>{lead.email}</a>
+                      {lead.email_source === 'hunter' && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                          background: '#1e3a5f', color: '#60a5fa', letterSpacing: '0.3px'
+                        }}>via Hunter.io ✓</span>
+                      )}
+                      {lead.email_source === 'scraper' && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                          background: '#1a3a2a', color: '#4ade80', letterSpacing: '0.3px'
+                        }}>via web scan (free)</span>
+                      )}
+                    </span>
+                  ) : '—'} />
                   <InfoRow label="Phone" value={lead.phone || '—'} />
                   <InfoRow label="Website" value={lead.website
                     ? <a href={lead.website} target="_blank" rel="noreferrer">{lead.website}</a>

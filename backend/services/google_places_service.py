@@ -30,25 +30,26 @@ async def _find_email(
     website: str | None,
     hunter_budget: int,
     hunter_used: list,          # list with one int — acts as mutable counter
-) -> tuple[str | None, str | None, str | None]:
+) -> tuple[str | None, str | None, str | None, str | None]:
     """
-    Returns (email, contact_name, position).
+    Returns (email, contact_name, position, email_source).
+    email_source = "hunter" | "scraper" | None
     Uses Hunter.io only if budget allows, otherwise falls back to free web scraper.
     hunter_used[0] is incremented each time Hunter.io is called.
     """
     if not website:
-        return None, None, None
+        return None, None, None, None
 
     # Use Hunter.io only if key is set AND we still have budget for this job
     if os.getenv("HUNTER_API_KEY") and hunter_used[0] < hunter_budget:
         result = await hunter_find(website)
         if result.get("email"):
             hunter_used[0] += 1
-            return result["email"], result.get("contact_name"), result.get("position")
+            return result["email"], result.get("contact_name"), result.get("position"), "hunter"
 
     # Free fallback — no credit used
     email = await scrape_find(website)
-    return email, None, None
+    return email, None, None, ("scraper" if email else None)
 
 
 async def search_businesses(
@@ -117,7 +118,7 @@ async def search_businesses(
                 name    = place.get("displayName", {}).get("text", "")
                 loc     = place.get("location", {})
                 city, state, country = _parse_address(addr)
-                email, contact_name, position = await _find_email(
+                email, contact_name, position, email_source = await _find_email(
                     website, hunter_budget, hunter_used
                 )
                 return {
@@ -127,6 +128,7 @@ async def search_businesses(
                     "website":       website,
                     "email":         email,
                     "contact_name":  contact_name,
+                    "email_source":  email_source,
                     "address":       addr,
                     "city":          city,
                     "state":         state,
