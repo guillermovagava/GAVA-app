@@ -56,10 +56,11 @@ STATE_CITIES: dict[str, list[str]] = {
 
 
 class ScrapeRequest(BaseModel):
-    category_label: str       # human label from GOOGLE_CATEGORIES
-    states: list[str]         # list of state/province abbreviations
+    category_label: str
+    states: list[str] = []
+    custom_locations: list[str] = []   # e.g. ["Miami Beach, FL", "Aspen, CO"]
     hunter_credits: int = 5   # max Hunter.io credits to spend on this job (0 = none)
-    max_results_per_city: int = 20   # 20, 40, or 60
+    max_results_per_city: int = 20
 
 
 @router.get("/categories")
@@ -87,7 +88,7 @@ async def run_scrape(
     if not cat:
         return {"error": f"Unknown category: {payload.category_label}"}
 
-    # Build city-level location list for better coverage
+    # Build city-level location list
     locations: list[str] = []
     for state in payload.states:
         cities = STATE_CITIES.get(state, [])
@@ -95,6 +96,10 @@ async def run_scrape(
             locations.extend([f"{city}, {state}" for city in cities])
         else:
             locations.append(state)
+    # Add custom locations directly
+    for loc in payload.custom_locations:
+        if loc.strip() and loc.strip() not in locations:
+            locations.append(loc.strip())
 
     job = ScrapeJob(
         category=payload.category_label,

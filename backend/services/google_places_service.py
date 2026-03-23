@@ -150,12 +150,45 @@ async def search_businesses(
 
 
 def _parse_address(addr: str) -> tuple[str, str, str]:
-    parts = [p.strip() for p in addr.split(",")]
-    city, state, country = "", "", "US"
-    if parts:
-        city = parts[0]
-    if len(parts) >= 2:
-        state = parts[1].strip().split()[0]
-    if "Canada" in addr:
+    """
+    Parse a Google Places formatted address into (city, state, country).
+    Google format: "Street?, City, State ZIP, Country"
+    We read from the END: country=last, state_zip=second-to-last, city=third-to-last.
+    """
+    if not addr:
+        return "", "", "US"
+
+    parts = [p.strip() for p in addr.split(",") if p.strip()]
+    if not parts:
+        return "", "", "US"
+
+    # Detect and remove country (last part)
+    country = "US"
+    last = parts[-1].upper()
+    if "AUSTRALIA" in last or last == "AU":
+        country = "AU"
+    elif "CANADA" in last or last == "CA":
         country = "CA"
+
+    # Remove country token if present
+    if any(c in parts[-1].upper() for c in ["USA", "UNITED STATES", "CANADA", "AUSTRALIA"]):
+        parts = parts[:-1]
+
+    state, city = "", ""
+
+    if len(parts) >= 2:
+        # Second-to-last = "MT 59714" or "FL 33132" → extract 2-letter state code
+        state_zip = parts[-1]
+        tokens = state_zip.split()
+        for token in tokens:
+            if len(token) == 2 and token.isalpha() and token.isupper():
+                state = token
+                break
+        if not state and tokens:
+            state = tokens[0]
+        # Third-to-last (or second if only 2 parts) = city name
+        city = parts[-2]
+    elif len(parts) == 1:
+        city = parts[0]
+
     return city, state, country

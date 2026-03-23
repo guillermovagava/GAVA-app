@@ -47,6 +47,10 @@ class LeadUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class BulkFindEmailRequest(BaseModel):
+    lead_ids: list[int]
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/")
@@ -270,6 +274,48 @@ async def find_email_hunter(lead_id: int, db: Session = Depends(get_db)):
         return {"email": email, "source": "scraper"}
 
     raise HTTPException(status_code=404, detail="No email found for this business")
+
+
+@router.post("/bulk-find-email")
+async def bulk_find_email(payload: BulkFindEmailRequest, db: Session = Depends(get_db)):
+    """
+    Run Hunter.io (or free scraper fallback) on multiple leads at once.
+    Only processes leads that have a website. Returns per-lead results.
+    """
+    import os
+    from services.hunter_service import find_hr_contact as hunter_find
+    from services.web_scraper import find_hr_email as scrape_find
+
+    results = []
+    for lead_id in payload.lead_ids:
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if not lead or not lead.website:
+            results.append({"id": lead_id, "status": "skipped", "reason": "no website"})
+            continue
+        try:
+            if os.getenv("HUNTER_API_KEY"):
+                result = await hunter_find(lead.website)
+                if result.get("email"):
+                    lead.email        = result["email"]
+                    lead.contact_name = result.get("contact_name") or lead.contact_name
+                    lead.email_source = "hunter"
+                    db.commit()
+                    results.append({"id": lead_id, "status": "found", "email": lead.email, "source": "hunter"})
+                    continue
+
+            email = await scrape_find(lead.website)
+            if email:
+                lead.email        = email
+                lead.email_source = "scraper"
+                db.commit()
+                results.append({"id": lead_id, "status": "found", "email": email, "source": "scraper"})
+            else:
+                results.append({"id": lead_id, "status": "not_found"})
+        except Exception as e:
+            results.append({"id": lead_id, "status": "error", "reason": str(e)})
+
+    found = sum(1 for r in results if r["status"] == "found")
+    return {"processed": len(results), "found": found, "results": results}
 
 
 @router.get("/{lead_id}")

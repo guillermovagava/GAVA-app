@@ -25,7 +25,7 @@ async def find_hr_contact(domain: str) -> dict:
 
     Falls back to the first available email if no HR-specific one is found.
     Consumes 1 Hunter.io search credit per call.
-    Automatically stops calling Hunter.io when monthly quota is reached.
+    Stops automatically when monthly free quota (25) is reached.
     """
     api_key = os.getenv("HUNTER_API_KEY", "")
     if not api_key or not domain:

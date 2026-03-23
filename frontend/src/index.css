@@ -63,7 +63,7 @@ body {
   background: var(--navy);
   border-bottom: 1px solid var(--border);
   padding: 0 24px;
-  height: 54px;
+  height: 120px;
   display: flex;
   align-items: center;
   gap: 28px;

@@ -260,15 +260,19 @@ export default function LeadDetail({ leadId, onClose, onDeleted, onUpdated, show
         ) : (
           <>
             <button className="btn btn-secondary" onClick={() => setEditing(true)}>Edit</button>
-            {!lead.email && lead.website && (
+            {lead.website && (
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={handleFindEmail}
                 disabled={findingEmail}
-                title="Search Hunter.io or website for HR email"
+                title={lead.email ? "Re-search with Hunter.io to find a better HR contact" : "Search Hunter.io or website for HR email"}
                 style={{ color: 'var(--gold)', borderColor: 'var(--gold-dim)' }}
               >
-                {findingEmail ? <><span className="spinner" style={{width:12,height:12}}/> Searching...</> : '🔍 Find Email'}
+                {findingEmail
+                  ? <><span className="spinner" style={{width:12,height:12}}/> Searching...</>
+                  : lead.email_source === 'hunter'
+                    ? '⚡ Re-run Hunter'
+                    : '⚡ Hunter Search'}
               </button>
             )}
             <button

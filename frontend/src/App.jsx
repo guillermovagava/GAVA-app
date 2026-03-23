@@ -60,10 +60,10 @@ export default function App() {
         {/* Logo */}
         <div className="header-logo">
           <img
-            src="/logo.png"
+            src="/logo.jpg"
             alt="GAVA Recruiting"
             style={{
-              height: 32,
+              height: 108,
               width: 'auto',
               mixBlendMode: 'screen',   /* removes black bg, keeps white logo */
               display: 'block',
