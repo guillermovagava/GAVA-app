@@ -100,6 +100,7 @@ export default function ScraperPanel({ showToast }) {
   const [selectedStates, setSelectedStates]       = useState([])
   const [selectedCities, setSelectedCities]       = useState([])  // empty = any city
   const [customCities, setCustomCities]           = useState('')
+  const [hunterCredits, setHunterCredits]         = useState(0)   // 0 = OFF by default
   const [resultsPerCity, setResultsPerCity]       = useState(20)
   const [jobs, setJobs]                           = useState([])
   const [running, setRunning]                     = useState(false)
@@ -180,8 +181,9 @@ export default function ScraperPanel({ showToast }) {
         await axios.post('/api/scraper/run', {
           category_label:   cat,
           states:           selectedStates,
-          selected_cities:  selectedCities,   // empty = any city in those states
+          selected_cities:  selectedCities,
           custom_locations: customLocs,
+          hunter_credits:   hunterCredits,
           max_results_per_city: resultsPerCity,
         })
       }
@@ -373,7 +375,43 @@ export default function ScraperPanel({ showToast }) {
           )}
         </div>
 
-        {/* 6 — Results per city */}
+        {/* 6 — Hunter.io credits (only shown when Hunter is connected) */}
+        {status.hunter && (
+          <div style={{
+            background: 'var(--surface)',
+            border: `1px solid ${hunterCredits > 0 ? '#92400e' : 'var(--border)'}`,
+            borderRadius: 10, padding: '12px 16px',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>Hunter.io credits for this search</span>
+              <span style={{
+                fontWeight: 700, fontSize: 14,
+                color: hunterCredits === 0 ? 'var(--text-dim)' : '#f59e0b',
+                background: hunterCredits === 0 ? 'var(--surface2)' : '#451a03',
+                borderRadius: 6, padding: '2px 10px',
+              }}>
+                {hunterCredits === 0 ? 'OFF — free scraper only' : `${hunterCredits} credit${hunterCredits !== 1 ? 's' : ''}`}
+              </span>
+            </div>
+            <input
+              type="range" min={0} max={25} step={1}
+              value={hunterCredits}
+              onChange={e => setHunterCredits(Number(e.target.value))}
+              style={{ width: '100%', accentColor: '#f59e0b' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-dim)', marginTop: 4 }}>
+              <span>0 — Free scraper only (no credits used)</span>
+              <span style={{ color: hunterCredits > 0 ? '#f59e0b' : 'var(--text-dim)' }}>
+                {hunterCredits > 0
+                  ? `Uses up to ${hunterCredits} of your monthly credits`
+                  : 'Scans company websites for free'}
+              </span>
+              <span>25</span>
+            </div>
+          </div>
+        )}
+
+        {/* 7 — Results per city */}
         <div>
           <label className="form-label">Results per city: <strong style={{ color: 'var(--gold)' }}>{resultsPerCity}</strong></label>
           <input type="range" min={20} max={60} step={20} value={resultsPerCity}

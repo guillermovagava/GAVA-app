@@ -94,7 +94,7 @@ class ScrapeRequest(BaseModel):
     states: list[str] = []
     selected_cities: list[str] = []    # if non-empty, only search these cities within the selected states
     custom_locations: list[str] = []   # e.g. ["Miami Beach, FL", "Aspen, CO"]
-    hunter_credits: int = 5   # max Hunter.io credits to spend on this job (0 = none)
+    hunter_credits: int = 0   # max Hunter.io credits to spend on this job (0 = none / default OFF)
     max_results_per_city: int = 20
 
 
