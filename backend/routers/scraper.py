@@ -14,6 +14,9 @@ from services.google_places_service import search_businesses, GOOGLE_CATEGORIES
 
 router = APIRouter()
 
+# In-memory set of job IDs that have been requested to cancel
+_cancel_requested: set[int] = set()
+
 STATE_CITIES: dict[str, list[str]] = {
     # ── United States ──────────────────────────────────────────────────────────
     "AL": ["Birmingham","Montgomery","Huntsville","Mobile","Tuscaloosa","Hoover","Auburn","Dothan","Decatur","Madison","Gadsden","Florence","Anniston","Gulf Shores","Orange Beach","Prattville","Vestavia Hills","Phenix City"],
@@ -178,6 +181,21 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     return _serialize_job(job)
 
 
+@router.post("/jobs/{job_id}/cancel")
+def cancel_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(ScrapeJob).filter(ScrapeJob.id == job_id).first()
+    if not job:
+        return {"error": "Job not found"}
+    if job.status == "running":
+        _cancel_requested.add(job_id)
+    # Also mark any non-running stuck jobs directly
+    if job.status in ("running", "pending"):
+        job.status = "stopped"
+        job.finished_at = datetime.utcnow()
+        db.commit()
+    return {"job_id": job_id, "status": "stopped"}
+
+
 # ── Background task ──────────────────────────────────────────────────────────
 
 LEAD_COLUMNS = {c.name for c in Lead.__table__.columns}
@@ -198,6 +216,15 @@ async def _scrape_task(job_id: int, query: str, locations: list[str], hunter_cre
         hunter_used = [0]
 
         for location in locations:
+            # Check if user cancelled this job
+            if job_id in _cancel_requested:
+                _cancel_requested.discard(job_id)
+                job.status = "stopped"
+                job.leads_found = total_saved
+                job.finished_at = datetime.utcnow()
+                db.commit()
+                return
+
             try:
                 results = await search_businesses(
                     query, location,

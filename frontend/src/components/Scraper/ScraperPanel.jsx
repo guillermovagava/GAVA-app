@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getScrapeJobs } from '../../api/client'
+import { getScrapeJobs, cancelJob } from '../../api/client'
 import axios from 'axios'
 
 const COUNTRIES = [
@@ -442,7 +442,7 @@ export default function ScraperPanel({ showToast }) {
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
             Running <span className="spinner" style={{ width: 12, height: 12 }} />
           </div>
-          <div className="jobs-list">{activeJobs.map(j => <JobCard key={j.id} job={j} />)}</div>
+          <div className="jobs-list">{activeJobs.map(j => <JobCard key={j.id} job={j} onCancel={() => cancelJob(j.id).then(loadJobs)} />)}</div>
         </div>
       )}
 
@@ -476,9 +476,16 @@ function StatusPill({ label, ok, okText, failText, warn = false }) {
   )
 }
 
-function JobCard({ job }) {
+function JobCard({ job, onCancel }) {
+  const [cancelling, setCancelling] = useState(false)
   const duration = job.started_at && job.finished_at
     ? Math.round((new Date(job.finished_at) - new Date(job.started_at)) / 1000) + 's' : null
+
+  function handleCancel() {
+    setCancelling(true)
+    onCancel().finally(() => setCancelling(false))
+  }
+
   return (
     <div className="job-card">
       <div className="job-info">
@@ -490,7 +497,22 @@ function JobCard({ job }) {
           {job.error && <span style={{ color: '#fca5a5' }}> · {job.error}</span>}
         </div>
       </div>
-      <span className={`job-status job-${job.status}`}>{job.status}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {job.status === 'running' && onCancel && (
+          <button
+            onClick={handleCancel}
+            disabled={cancelling}
+            style={{
+              background: '#7f1d1d', color: '#fca5a5', border: '1px solid #991b1b',
+              borderRadius: 6, padding: '3px 10px', fontSize: 11, cursor: 'pointer',
+              opacity: cancelling ? 0.6 : 1,
+            }}
+          >
+            {cancelling ? 'Stopping…' : '■ Stop'}
+          </button>
+        )}
+        <span className={`job-status job-${job.status}`}>{job.status}</span>
+      </div>
     </div>
   )
 }

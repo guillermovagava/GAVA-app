@@ -22,6 +22,7 @@ export const exportLeads = (params = {}) => {
 export const getCategories  = () => api.get('/scraper/categories').then(r => r.data)
 export const getScrapeJobs  = () => api.get('/scraper/jobs').then(r => r.data)
 export const getScrapeJob   = (id) => api.get(`/scraper/jobs/${id}`).then(r => r.data)
+export const cancelJob      = (id) => api.post(`/scraper/jobs/${id}/cancel`).then(r => r.data)
 
 // ── Email ──────────────────────────────────────────────────────────────────
 export const sendEmail = (data) => api.post('/email/send', data).then(r => r.data)
