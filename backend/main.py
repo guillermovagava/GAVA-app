@@ -14,6 +14,17 @@ from routers import leads, scraper, email_router, claude_router
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
 
+# ── Startup migrations (safe, idempotent) ─────────────────────────────────────
+from sqlalchemy import text as _text
+with engine.connect() as _conn:
+    _cols = [r[1] for r in _conn.execute(_text("PRAGMA table_info(leads)")).fetchall()]
+    if "archived" not in _cols:
+        _conn.execute(_text("ALTER TABLE leads ADD COLUMN archived INTEGER DEFAULT 0 NOT NULL"))
+        _conn.commit()
+    if "position" not in _cols:
+        _conn.execute(_text("ALTER TABLE leads ADD COLUMN position TEXT"))
+        _conn.commit()
+
 app = FastAPI(title="GAVA Recruitment CRM", version="1.0.0")
 
 app.add_middleware(

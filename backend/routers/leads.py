@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
+import os
+import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel
@@ -27,7 +29,9 @@ class LeadCreate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     contact_name: Optional[str] = None
+    position: Optional[str] = None
     notes: Optional[str] = None
+    source: Optional[str] = "manual"
 
 
 class LeadUpdate(BaseModel):
@@ -43,12 +47,18 @@ class LeadUpdate(BaseModel):
     lat: Optional[float] = None
     lng: Optional[float] = None
     contact_name: Optional[str] = None
+    position: Optional[str] = None
     status: Optional[str] = None
     notes: Optional[str] = None
+    archived: Optional[bool] = None
 
 
 class BulkFindEmailRequest(BaseModel):
     lead_ids: list[int]
+
+
+class StatusUpdate(BaseModel):
+    status: str
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -63,10 +73,17 @@ def list_leads(
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     has_email: Optional[bool] = Query(None),
+    email_source: Optional[str] = Query(None),   # "hunter" | "scraper" | "none"
+    sort: Optional[str] = Query(None),            # "score_desc" | "score_asc" | "name_asc"
+    archived: Optional[bool] = Query(None),
     skip: int = 0,
     limit: int = 500,
 ):
     q = db.query(Lead)
+    if archived is True:
+        q = q.filter(Lead.archived == True)   # noqa: E712
+    else:
+        q = q.filter(Lead.archived == False)  # noqa: E712
     if country:   q = q.filter(Lead.country == country)
     if state:     q = q.filter(Lead.state == state)
     if city:      q = q.filter(Lead.city.ilike(f"%{city}%"))
@@ -74,6 +91,9 @@ def list_leads(
     if status:    q = q.filter(Lead.status == status)
     if has_email is True:  q = q.filter(Lead.email.isnot(None), Lead.email != "")
     if has_email is False: q = q.filter((Lead.email.is_(None)) | (Lead.email == ""))
+    if email_source == "hunter":  q = q.filter(Lead.email_source == "hunter")
+    if email_source == "scraper": q = q.filter(Lead.email_source == "scraper")
+    if email_source == "none":    q = q.filter((Lead.email.is_(None)) | (Lead.email == ""))
     if search:
         q = q.filter(
             Lead.business_name.ilike(f"%{search}%") |
@@ -81,8 +101,15 @@ def list_leads(
             Lead.email.ilike(f"%{search}%")
         )
     total = q.count()
-    leads = q.order_by(Lead.created_at.desc()).offset(skip).limit(limit).all()
-    return {"total": total, "leads": [_serialize(l) for l in leads]}
+    if sort == "name_asc":
+        leads = q.order_by(Lead.business_name.asc()).offset(skip).limit(limit).all()
+    else:
+        leads = q.order_by(Lead.created_at.desc()).offset(skip).limit(limit).all()
+    result = [_serialize(l) for l in leads]
+    # Score sorting is done in Python since score is computed, not stored
+    if sort == "score_desc": result.sort(key=lambda l: l["score"], reverse=True)
+    if sort == "score_asc":  result.sort(key=lambda l: l["score"])
+    return {"total": total, "leads": result}
 
 
 @router.get("/map-pins")
@@ -90,7 +117,7 @@ def map_pins(db: Session = Depends(get_db)):
     leads = db.query(
         Lead.id, Lead.business_name, Lead.city, Lead.state,
         Lead.lat, Lead.lng, Lead.status, Lead.category
-    ).filter(Lead.lat.isnot(None), Lead.lng.isnot(None)).all()
+    ).filter(Lead.lat.isnot(None), Lead.lng.isnot(None), Lead.archived == False).all()
     return [
         {
             "id": l.id, "business_name": l.business_name,
@@ -104,10 +131,10 @@ def map_pins(db: Session = Depends(get_db)):
 
 @router.get("/stats")
 def stats(db: Session = Depends(get_db)):
-    total = db.query(func.count(Lead.id)).scalar()
-    by_status = db.query(Lead.status, func.count(Lead.id)).group_by(Lead.status).all()
-    by_state  = db.query(Lead.state, func.count(Lead.id)).group_by(Lead.state).order_by(func.count(Lead.id).desc()).limit(10).all()
-    with_email = db.query(func.count(Lead.id)).filter(Lead.email.isnot(None), Lead.email != "").scalar()
+    total = db.query(func.count(Lead.id)).filter(Lead.archived == False).scalar()
+    by_status = db.query(Lead.status, func.count(Lead.id)).filter(Lead.archived == False).group_by(Lead.status).all()
+    by_state  = db.query(Lead.state, func.count(Lead.id)).filter(Lead.archived == False).group_by(Lead.state).order_by(func.count(Lead.id).desc()).limit(10).all()
+    with_email = db.query(func.count(Lead.id)).filter(Lead.archived == False).filter(Lead.email.isnot(None), Lead.email != "").scalar()
     return {
         "total": total,
         "with_email": with_email,
@@ -318,6 +345,50 @@ async def bulk_find_email(payload: BulkFindEmailRequest, db: Session = Depends(g
     return {"processed": len(results), "found": found, "results": results}
 
 
+@router.get("/{lead_id}/photo")
+async def get_lead_photo(lead_id: int, db: Session = Depends(get_db)):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead or not lead.photo_ref:
+        raise HTTPException(status_code=404, detail="No photo available")
+    api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
+    url = f"https://places.googleapis.com/v1/{lead.photo_ref}/media?maxHeightPx=600&maxWidthPx=900&key={api_key}"
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        resp = await client.get(url)
+    if resp.status_code != 200:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return Response(content=resp.content, media_type=resp.headers.get("content-type", "image/jpeg"))
+
+
+@router.patch("/{lead_id}/status")
+def update_status(lead_id: int, payload: StatusUpdate, db: Session = Depends(get_db)):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    lead.status = payload.status
+    db.commit()
+    return _serialize(lead)
+
+
+@router.patch("/{lead_id}/archive")
+def archive_lead(lead_id: int, db: Session = Depends(get_db)):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    lead.archived = True
+    db.commit()
+    return {"id": lead_id, "archived": True}
+
+
+@router.patch("/{lead_id}/unarchive")
+def unarchive_lead(lead_id: int, db: Session = Depends(get_db)):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    lead.archived = False
+    db.commit()
+    return {"id": lead_id, "archived": False}
+
+
 @router.get("/{lead_id}")
 def get_lead(lead_id: int, db: Session = Depends(get_db)):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
@@ -357,9 +428,9 @@ def delete_lead(lead_id: int, db: Session = Depends(get_db)):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    db.delete(lead)
+    lead.archived = True
     db.commit()
-    return {"deleted": True}
+    return {"archived": True, "id": lead_id}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -394,10 +465,13 @@ def _serialize(lead: Lead) -> dict:
         "lat":           lead.lat,
         "lng":           lead.lng,
         "contact_name":  lead.contact_name,
+        "position":      lead.position,
+        "archived":      bool(lead.archived),
         "status":        lead.status,
         "source":        lead.source,
         "notes":         lead.notes,
         "score":         _score_lead(lead),
+        "photo_ref":     lead.photo_ref,
         "created_at":    lead.created_at.isoformat() if lead.created_at else None,
         "last_contacted": lead.last_contacted.isoformat() if lead.last_contacted else None,
     }

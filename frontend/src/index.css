@@ -706,3 +706,230 @@ body {
   color: var(--text-dim);
 }
 .empty-state p { margin-top: 8px; font-size: 12px; line-height: 1.6; }
+
+/* ── CRM Pipeline Table ───────────────────────────────────────────────────── */
+--lost: #7f1d1d;
+--qualified: #0e7490;
+
+.crm-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.crm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.crm-filters input[type="text"],
+.crm-filters select {
+  background: var(--navy);
+  border: 1px solid var(--border);
+  color: var(--mist);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  outline: none;
+  height: 30px;
+}
+
+.crm-filters input[type="text"] { width: 180px; }
+.crm-filters input[type="text"]::placeholder { color: var(--text-dim); }
+.crm-filters select { cursor: pointer; }
+
+.crm-table-wrap {
+  flex: 1;
+  overflow: auto;
+}
+
+.crm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.crm-th {
+  padding: 9px 12px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
+  background: var(--navy);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  white-space: nowrap;
+}
+.crm-th.sortable { cursor: pointer; user-select: none; }
+.crm-th.sortable:hover { color: var(--mist); }
+
+.crm-td {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(59,64,96,0.35);
+  color: var(--mist);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.crm-tr:hover .crm-td { background: var(--surface2); }
+.crm-tr.archived .crm-td { opacity: 0.45; }
+
+.crm-name-btn {
+  background: none;
+  border: none;
+  color: var(--mist);
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  padding: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  display: block;
+}
+.crm-name-btn:hover { color: var(--gold); text-decoration: underline; }
+
+.crm-status-select {
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  outline: none;
+  border: none;
+  text-transform: uppercase;
+}
+
+.crm-action-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: all 0.15s;
+}
+.crm-action-btn:hover { color: var(--mist); border-color: var(--gold); }
+.crm-action-btn.danger:hover { color: #fca5a5; border-color: #991b1b; background: #7f1d1d; }
+.crm-action-btn.restore:hover { color: #86efac; border-color: #15803d; }
+
+/* Status badge colours in select */
+.status-select-new        { background: #1e3a8a; color: #93c5fd; }
+.status-select-contacted  { background: #78350f; color: #fcd34d; }
+.status-select-replied    { background: #3b0764; color: #d8b4fe; }
+.status-select-qualified  { background: #164e63; color: #67e8f9; }
+.status-select-converted  { background: #14532d; color: #86efac; }
+.status-select-lost       { background: #7f1d1d; color: #fca5a5; }
+
+/* ── Add Lead Modal ───────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  animation: fade-in 0.15s ease;
+}
+
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 620px;
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+}
+
+.modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gold);
+  background: var(--navy);
+  border-radius: 10px 10px 0 0;
+  flex-shrink: 0;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-content: start;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.modal-field.full { grid-column: 1 / -1; }
+
+.modal-field label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.modal-field input,
+.modal-field select,
+.modal-field textarea {
+  background: var(--navy);
+  border: 1px solid var(--border);
+  color: var(--mist);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.modal-field input:focus,
+.modal-field select:focus,
+.modal-field textarea:focus { border-color: var(--gold); }
+.modal-field textarea { resize: vertical; min-height: 60px; }
+
+.modal-footer {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}

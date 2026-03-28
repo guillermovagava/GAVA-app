@@ -24,6 +24,11 @@ export const getScrapeJobs  = () => api.get('/scraper/jobs').then(r => r.data)
 export const getScrapeJob   = (id) => api.get(`/scraper/jobs/${id}`).then(r => r.data)
 export const cancelJob      = (id) => api.post(`/scraper/jobs/${id}/cancel`).then(r => r.data)
 
+export const updateLeadStatus  = (id, status) => api.patch(`/leads/${id}/status`, { status }).then(r => r.data)
+export const archiveLead       = (id)          => api.patch(`/leads/${id}/archive`).then(r => r.data)
+export const unarchiveLead     = (id)          => api.patch(`/leads/${id}/unarchive`).then(r => r.data)
+export const bulkFindEmail     = (ids)         => api.post('/leads/bulk-find-email', { lead_ids: ids }).then(r => r.data)
+
 // ── Email ──────────────────────────────────────────────────────────────────
 export const sendEmail = (data) => api.post('/email/send', data).then(r => r.data)
 

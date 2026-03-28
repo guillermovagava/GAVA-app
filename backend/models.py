@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -20,12 +20,15 @@ class Lead(Base):
     lat = Column(Float)
     lng = Column(Float)
     contact_name = Column(String)
+    position = Column(String, nullable=True)
     # new | contacted | replied | meeting_booked | converted
     status = Column(String, default="new")
     source = Column(String)          # google | manual
     email_source = Column(String)    # hunter | scraper | None
+    photo_ref = Column(String)       # Google Places photo resource name
     notes = Column(Text)
     yelp_id = Column(String, unique=True, nullable=True)
+    archived = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_contacted = Column(DateTime, nullable=True)
 

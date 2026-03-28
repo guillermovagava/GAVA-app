@@ -3,10 +3,11 @@ import MapView from './components/Map/MapView'
 import LeadList from './components/Leads/LeadList'
 import LeadDetail from './components/Leads/LeadDetail'
 import ScraperPanel from './components/Scraper/ScraperPanel'
+import CRMTable from './components/CRM/CRMTable'
 import { getMapPins, getStats } from './api/client'
 
 export default function App() {
-  const [view, setView] = useState('map')       // 'map' | 'scraper'
+  const [view, setView] = useState('map')       // 'map' | 'scraper' | 'crm'
   const [pins, setPins] = useState([])
   const [stats, setStats] = useState(null)
   const [selectedLead, setSelectedLead] = useState(null)   // { id, lat, lng, ... }
@@ -86,6 +87,12 @@ export default function App() {
           >
             Scraper
           </button>
+          <button
+            className={`nav-btn${view === 'crm' ? ' active' : ''}`}
+            onClick={() => setView('crm')}
+          >
+            CRM Pipeline
+          </button>
         </nav>
 
         {stats && (
@@ -146,9 +153,13 @@ export default function App() {
               </div>
             </main>
           </>
-        ) : (
+        ) : view === 'scraper' ? (
           <main className="main-panel" style={{ overflow: 'auto' }}>
             <ScraperPanel showToast={showToast} />
+          </main>
+        ) : (
+          <main className="main-panel" style={{ overflow: 'hidden', padding: 0 }}>
+            <CRMTable showToast={showToast} onLeadUpdated={handleUpdated} />
           </main>
         )}
       </div>
