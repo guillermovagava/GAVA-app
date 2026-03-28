@@ -21,7 +21,7 @@ function ScoreDots({ score }) {
 export default function LeadList({ selectedId, onSelect }) {
   const [leads, setLeads]     = useState([])
   const [total, setTotal]     = useState(0)
-  const [filters, setFilters] = useState({ search: '', country: '', state: '', city: '', category: '', status: '', email_source: '' })
+  const [filters, setFilters] = useState({ search: '', country: '', state: '', city: '', category: '', status: '', email_source: '', sort: '' })
   const [options, setOptions] = useState({ countries: [], states: [], cities: [], categories: [] })
   const [loading, setLoading] = useState(false)
 
@@ -49,14 +49,11 @@ export default function LeadList({ selectedId, onSelect }) {
       if (filters.city)         params.city         = filters.city
       if (filters.category)     params.category     = filters.category
       if (filters.status)       params.status       = filters.status
-      if (filters.email_source === 'none') params.has_email = false
+      if (filters.email_source) params.email_source = filters.email_source
+      if (filters.sort)         params.sort         = filters.sort
       const data = await getLeads(params)
-      // If filtering by Hunter/scraper, do it client-side
-      let filtered = data.leads
-      if (filters.email_source === 'hunter')  filtered = filtered.filter(l => l.email_source === 'hunter')
-      if (filters.email_source === 'scraper') filtered = filtered.filter(l => l.email_source === 'scraper')
-      setLeads(filtered)
-      setTotal(filters.email_source ? filtered.length : data.total)
+      setLeads(data.leads)
+      setTotal(data.total)
     } finally {
       setLoading(false)
     }
@@ -144,6 +141,14 @@ export default function LeadList({ selectedId, onSelect }) {
           <option value="hunter">⚡ Via Hunter.io</option>
           <option value="scraper">🆓 Via Free Scraper</option>
           <option value="none">❌ No Email Yet</option>
+        </select>
+
+        {/* Sort */}
+        <select className="filter-select" value={filters.sort} onChange={e => set('sort', e.target.value)}>
+          <option value="">Sort: Newest First</option>
+          <option value="score_desc">Sort: Score ↑ High to Low</option>
+          <option value="score_asc">Sort: Score ↓ Low to High</option>
+          <option value="name_asc">Sort: A → Z Name</option>
         </select>
 
         {/* Footer */}

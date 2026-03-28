@@ -83,6 +83,7 @@ async def search_businesses(
             "places.location,"
             "places.nationalPhoneNumber,"
             "places.websiteUri,"
+            "places.photos,"
             "nextPageToken"
         ),
     }
@@ -117,6 +118,8 @@ async def search_businesses(
                 addr    = place.get("formattedAddress", "")
                 name    = place.get("displayName", {}).get("text", "")
                 loc     = place.get("location", {})
+                photos  = place.get("photos", [])
+                photo_ref = photos[0].get("name") if photos else None
                 city, state, country = _parse_address(addr)
                 email, contact_name, position, email_source = await _find_email(
                     website, hunter_budget, hunter_used
@@ -136,6 +139,7 @@ async def search_businesses(
                     "lat":           loc.get("latitude"),
                     "lng":           loc.get("longitude"),
                     "source":        "google",
+                    "photo_ref":     photo_ref,
                 }
 
             enriched = await asyncio.gather(*[enrich(p) for p in places])

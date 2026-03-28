@@ -103,6 +103,21 @@ export default function LeadDetail({ leadId, onClose, onDeleted, onUpdated, show
       <div className="detail-body">
         {tab === 'info' && (
           <div>
+            {/* Place photo */}
+            {lead.photo_ref && (
+              <div style={{ marginBottom: 0 }}>
+                <img
+                  src={`/api/leads/${lead.id}/photo`}
+                  alt={lead.business_name}
+                  style={{
+                    width: '100%', height: 180, objectFit: 'cover',
+                    display: 'block', borderBottom: '1px solid var(--border)',
+                  }}
+                  onError={e => { e.target.style.display = 'none' }}
+                />
+              </div>
+            )}
+
             {/* Status selector */}
             <div className="detail-section">
               <div className="detail-section-title">Status</div>

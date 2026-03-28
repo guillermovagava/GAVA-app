@@ -4,33 +4,17 @@ echo  GAVA Recruitment CRM - First-Time Setup
 echo ============================================================
 echo.
 
-REM ── Check for Python 3.12 specifically ──────────────────────
-py -3.12 --version >nul 2>&1
+REM Check Python
+python --version >nul 2>&1
 IF ERRORLEVEL 1 (
-    echo.
-    echo ERROR: Python 3.12 is not installed.
-    echo.
-    echo You appear to have a different version of Python, but this app
-    echo requires Python 3.12 because some packages are not yet compatible
-    echo with newer versions.
-    echo.
-    echo Please do the following:
-    echo   1. Go to: https://www.python.org/downloads/release/python-3128/
-    echo   2. Scroll down and click: "Windows installer (64-bit)"
-    echo   3. Run the installer
-    echo   4. IMPORTANT: Check the box that says "Add Python to PATH"
-    echo   5. Click "Install Now"
-    echo   6. Once done, run this setup.bat again
-    echo.
+    echo ERROR: Python is not installed.
+    echo Please download and install Python 3.11+ from https://www.python.org/downloads/
+    echo Make sure to check "Add Python to PATH" during installation.
     pause
     exit /b 1
 )
 
-FOR /F "tokens=*" %%i IN ('py -3.12 --version') DO SET PYTHON_VER=%%i
-echo Using %PYTHON_VER%
-echo.
-
-REM ── Check Node.js ────────────────────────────────────────────
+REM Check Node.js
 node --version >nul 2>&1
 IF ERRORLEVEL 1 (
     echo ERROR: Node.js is not installed.
@@ -39,21 +23,16 @@ IF ERRORLEVEL 1 (
     exit /b 1
 )
 
-REM ── Install Python backend dependencies ───────────────────────
 echo [1/4] Installing Python backend dependencies...
 cd backend
-py -3.12 -m pip install --upgrade pip --quiet
-py -3.12 -m pip install -r requirements.txt
+pip install -r requirements.txt
 IF ERRORLEVEL 1 (
-    echo.
     echo ERROR: Failed to install Python dependencies.
-    echo Please send a screenshot of this error for help.
     pause
     exit /b 1
 )
 cd ..
 
-REM ── Install frontend dependencies ─────────────────────────────
 echo.
 echo [2/4] Installing frontend dependencies...
 cd frontend
@@ -65,7 +44,6 @@ IF ERRORLEVEL 1 (
 )
 cd ..
 
-REM ── Create .env from template ──────────────────────────────────
 echo.
 echo [3/4] Creating .env file from template...
 IF NOT EXIST .env (
@@ -75,7 +53,6 @@ IF NOT EXIST .env (
     echo .env file already exists - skipping.
 )
 
-REM ── Done ───────────────────────────────────────────────────────
 echo.
 echo [4/4] Setup complete!
 echo.
