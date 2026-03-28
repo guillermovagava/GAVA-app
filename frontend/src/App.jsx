@@ -61,7 +61,7 @@ export default function App() {
         {/* Logo */}
         <div className="header-logo">
           <img
-            src="/logo.jpg"
+            src="/logo.png"
             alt="GAVA Recruiting"
             style={{
               height: 108,
