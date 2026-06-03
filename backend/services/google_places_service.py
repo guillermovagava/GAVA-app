@@ -7,6 +7,7 @@ import asyncio
 import httpx
 from services.hunter_service import find_hr_contact as hunter_find
 from services.web_scraper import find_hr_email as scrape_find
+from services import google_quota
 
 PLACES_NEW_BASE = "https://places.googleapis.com/v1"
 
@@ -23,6 +24,7 @@ GOOGLE_CATEGORIES = [
     {"label": "Vacation Lodges",         "query": "vacation rental lodge"},
     {"label": "Beach Clubs",             "query": "beach club resort"},
     {"label": "Theme Parks",             "query": "theme park"},
+    {"label": "Restaurants",             "query": "restaurant"},
 ]
 
 
@@ -106,6 +108,7 @@ async def search_businesses(
                 )
                 resp.raise_for_status()
                 data = resp.json()
+                google_quota.increment()
             except Exception:
                 break
 

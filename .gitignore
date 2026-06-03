@@ -12,6 +12,10 @@ venv/
 # Database (local data, not committed)
 backend/*.db
 
+# Runtime quota tracking (auto-created, resets monthly)
+backend/google_quota.json
+backend/hunter_quota.json
+
 # Node
 node_modules/
 frontend/node_modules/

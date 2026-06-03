@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models import Lead, ScrapeJob
 from services.google_places_service import search_businesses, GOOGLE_CATEGORIES
+from services import google_quota
 
 router = APIRouter()
 
@@ -120,6 +121,12 @@ def get_status():
         "hunter":        bool(os.getenv("HUNTER_API_KEY")),
         "email_fallback": True,   # web scraper is always available
     }
+
+
+@router.get("/google-quota")
+def get_google_quota():
+    """Returns monthly Google Places API request usage and remaining budget."""
+    return google_quota.get_status()
 
 
 @router.post("/run")

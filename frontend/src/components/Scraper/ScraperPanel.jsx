@@ -95,6 +95,7 @@ const CITIES_BY_STATE = {
 export default function ScraperPanel({ showToast }) {
   const [categories, setCategories]               = useState([])
   const [status, setStatus]                       = useState({ google_places: false, hunter: false })
+  const [googleQuota, setGoogleQuota]             = useState(null)
   const [selectedCats, setSelectedCats]           = useState([])
   const [selectedCountries, setSelectedCountries] = useState(['US'])
   const [selectedStates, setSelectedStates]       = useState([])
@@ -109,6 +110,7 @@ export default function ScraperPanel({ showToast }) {
   useEffect(() => {
     axios.get('/api/scraper/categories').then(r => setCategories(r.data)).catch(() => {})
     axios.get('/api/scraper/status').then(r => setStatus(r.data)).catch(() => {})
+    axios.get('/api/scraper/google-quota').then(r => setGoogleQuota(r.data)).catch(() => {})
     loadJobs()
   }, [])
 
@@ -164,6 +166,20 @@ export default function ScraperPanel({ showToast }) {
     return customCities.split('\n').map(l => l.trim()).filter(l => l.length > 0)
   }
 
+  function estimateRequests() {
+    let locs = customLocs.length
+    if (selectedStates.length > 0) {
+      if (anyCityMode) {
+        locs += statesWithCities.flatMap(s => CITIES_BY_STATE[s] || []).length
+        const statesWithoutCities = selectedStates.filter(s => !(CITIES_BY_STATE[s] || []).length)
+        locs += statesWithoutCities.length
+      } else {
+        locs += selectedCities.length
+      }
+    }
+    return locs * selectedCats.length * Math.ceil(resultsPerCity / 20)
+  }
+
   async function startScrape() {
     if (!status.google_places) {
       showToast('Add GOOGLE_PLACES_API_KEY to .env first', 'error'); return
@@ -189,6 +205,7 @@ export default function ScraperPanel({ showToast }) {
       }
       showToast(`Started ${selectedCats.length} search job${selectedCats.length > 1 ? 's' : ''}`, 'success')
       loadJobs()
+      axios.get('/api/scraper/google-quota').then(r => setGoogleQuota(r.data)).catch(() => {})
     } catch (e) {
       showToast('Failed to start: ' + (e.response?.data?.detail || e.message), 'error')
     } finally {
@@ -216,6 +233,9 @@ export default function ScraperPanel({ showToast }) {
           okText="Connected" failText="Missing API key — add GOOGLE_PLACES_API_KEY to .env" />
         <StatusPill label="Hunter.io" ok={status.hunter} warn
           okText="Connected — verified emails" failText="Not set — using free website scanner" />
+        {googleQuota && status.google_places && (
+          <QuotaPill used={googleQuota.used} limit={googleQuota.limit} remaining={googleQuota.remaining} month={googleQuota.month} />
+        )}
       </div>
 
       <div className="scraper-form">
@@ -422,6 +442,45 @@ export default function ScraperPanel({ showToast }) {
           </div>
         </div>
 
+        {/* Request estimate + start */}
+        {selectedCats.length > 0 && (selectedStates.length > 0 || customLocs.length > 0) && (() => {
+          const est = estimateRequests()
+          const remaining = googleQuota?.remaining ?? Infinity
+          const overQuota = est > remaining
+          return (
+            <div style={{
+              background: 'var(--surface)',
+              border: `1px solid ${overQuota ? '#7f1d1d' : '#1e3a5f'}`,
+              borderRadius: 10, padding: '10px 14px',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+            }}>
+              <div>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Requests estimados: </span>
+                <span style={{ fontWeight: 700, fontSize: 14, color: overQuota ? '#fca5a5' : 'var(--gold)' }}>
+                  ~{est.toLocaleString()} requests
+                </span>
+                {googleQuota && (
+                  <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 8 }}>
+                    ({googleQuota.remaining.toLocaleString()} disponibles este mes)
+                  </span>
+                )}
+                {overQuota && (
+                  <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 2 }}>
+                    Excede el presupuesto mensual. Reduce ciudades o categorías.
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                {Math.ceil(resultsPerCity / 20)} req/ciudad · {
+                  anyCityMode
+                    ? statesWithCities.flatMap(s => CITIES_BY_STATE[s] || []).length + selectedStates.filter(s => !(CITIES_BY_STATE[s] || []).length).length
+                    : selectedCities.length
+                }{customLocs.length > 0 ? `+${customLocs.length}` : ''} ciudades · {selectedCats.length} cat.
+              </div>
+            </div>
+          )
+        })()}
+
         {/* Start button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button className="btn btn-primary" onClick={startScrape} disabled={running} style={{ minWidth: 140 }}>
@@ -455,6 +514,28 @@ export default function ScraperPanel({ showToast }) {
           <div className="jobs-list">{doneJobs.slice(0, 20).map(j => <JobCard key={j.id} job={j} />)}</div>
         </div>
       )}
+    </div>
+  )
+}
+
+function QuotaPill({ used, limit, remaining, month }) {
+  const pct = Math.min(100, Math.round((used / limit) * 100))
+  const low = remaining < limit * 0.15
+  const color = low ? '#fca5a5' : 'var(--gold)'
+  const borderColor = low ? '#7f1d1d' : '#1e3a5f'
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)',
+      border: `1px solid ${borderColor}`, borderRadius: 8, padding: '8px 12px', fontSize: 12,
+    }}>
+      <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: low ? '#dc2626' : '#3b82f6' }} />
+      <div>
+        <div style={{ fontWeight: 600 }}>Google Places Quota</div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+          <span style={{ color }}>{remaining.toLocaleString()} disponibles</span>
+          {' '}· {used.toLocaleString()} / {limit.toLocaleString()} usados ({pct}%) · {month}
+        </div>
+      </div>
     </div>
   )
 }
