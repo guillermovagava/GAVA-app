@@ -4,6 +4,16 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
+class SearchProfile(Base):
+    __tablename__ = "search_profiles"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    name        = Column(String, nullable=False)
+    description = Column(Text, nullable=False)   # user's natural language description
+    query       = Column(String, nullable=False)  # Claude-generated Places API query
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
 class Lead(Base):
     __tablename__ = "leads"
 

@@ -97,6 +97,12 @@ export default function ScraperPanel({ showToast }) {
   const [status, setStatus]                       = useState({ google_places: false, hunter: false })
   const [googleQuota, setGoogleQuota]             = useState(null)
   const [selectedCats, setSelectedCats]           = useState([])
+  const [profiles, setProfiles]                   = useState([])
+  const [selectedProfiles, setSelectedProfiles]   = useState([])
+  const [showProfileForm, setShowProfileForm]     = useState(false)
+  const [newProfileName, setNewProfileName]       = useState('')
+  const [newProfileDesc, setNewProfileDesc]       = useState('')
+  const [creatingProfile, setCreatingProfile]     = useState(false)
   const [selectedCountries, setSelectedCountries] = useState(['US'])
   const [selectedStates, setSelectedStates]       = useState([])
   const [selectedCities, setSelectedCities]       = useState([])  // empty = any city
@@ -111,6 +117,7 @@ export default function ScraperPanel({ showToast }) {
     axios.get('/api/scraper/categories').then(r => setCategories(r.data)).catch(() => {})
     axios.get('/api/scraper/status').then(r => setStatus(r.data)).catch(() => {})
     axios.get('/api/scraper/google-quota').then(r => setGoogleQuota(r.data)).catch(() => {})
+    axios.get('/api/search-profiles').then(r => setProfiles(r.data)).catch(() => {})
     loadJobs()
   }, [])
 
@@ -166,6 +173,37 @@ export default function ScraperPanel({ showToast }) {
     return customCities.split('\n').map(l => l.trim()).filter(l => l.length > 0)
   }
 
+  function toggleProfile(p) {
+    setSelectedProfiles(prev =>
+      prev.find(x => x.id === p.id) ? prev.filter(x => x.id !== p.id) : [...prev, p]
+    )
+  }
+
+  async function saveProfile() {
+    if (!newProfileName.trim() || !newProfileDesc.trim()) return
+    setCreatingProfile(true)
+    try {
+      const r = await axios.post('/api/search-profiles', {
+        name: newProfileName.trim(),
+        description: newProfileDesc.trim(),
+      })
+      setProfiles(prev => [r.data, ...prev])
+      setNewProfileName('')
+      setNewProfileDesc('')
+      setShowProfileForm(false)
+    } catch (e) {
+      showToast('Error al crear perfil: ' + (e.response?.data?.detail || e.message), 'error')
+    } finally {
+      setCreatingProfile(false)
+    }
+  }
+
+  async function deleteProfile(id) {
+    await axios.delete(`/api/search-profiles/${id}`).catch(() => {})
+    setProfiles(prev => prev.filter(p => p.id !== id))
+    setSelectedProfiles(prev => prev.filter(p => p.id !== id))
+  }
+
   function estimateRequests() {
     let locs = customLocs.length
     if (selectedStates.length > 0) {
@@ -177,14 +215,17 @@ export default function ScraperPanel({ showToast }) {
         locs += selectedCities.length
       }
     }
-    return locs * selectedCats.length * Math.ceil(resultsPerCity / 20)
+    const totalSearches = selectedCats.length + selectedProfiles.length
+    return locs * totalSearches * Math.ceil(resultsPerCity / 20)
   }
 
   async function startScrape() {
     if (!status.google_places) {
       showToast('Add GOOGLE_PLACES_API_KEY to .env first', 'error'); return
     }
-    if (selectedCats.length === 0) { showToast('Select at least one business type', 'error'); return }
+    if (selectedCats.length === 0 && selectedProfiles.length === 0) {
+      showToast('Select at least one business type or AI profile', 'error'); return
+    }
 
     const customLocs = parseCustomCities()
     if (selectedStates.length === 0 && customLocs.length === 0) {
@@ -193,17 +234,21 @@ export default function ScraperPanel({ showToast }) {
 
     setRunning(true)
     try {
-      for (const cat of selectedCats) {
-        await axios.post('/api/scraper/run', {
-          category_label:   cat,
-          states:           selectedStates,
-          selected_cities:  selectedCities,
-          custom_locations: customLocs,
-          hunter_credits:   hunterCredits,
-          max_results_per_city: resultsPerCity,
-        })
+      const basePayload = {
+        states:           selectedStates,
+        selected_cities:  selectedCities,
+        custom_locations: customLocs,
+        hunter_credits:   hunterCredits,
+        max_results_per_city: resultsPerCity,
       }
-      showToast(`Started ${selectedCats.length} search job${selectedCats.length > 1 ? 's' : ''}`, 'success')
+      for (const cat of selectedCats) {
+        await axios.post('/api/scraper/run', { ...basePayload, category_label: cat })
+      }
+      for (const profile of selectedProfiles) {
+        await axios.post('/api/scraper/run', { ...basePayload, category_label: profile.name, query: profile.query })
+      }
+      const total = selectedCats.length + selectedProfiles.length
+      showToast(`Started ${total} search job${total !== 1 ? 's' : ''}`, 'success')
       loadJobs()
       axios.get('/api/scraper/google-quota').then(r => setGoogleQuota(r.data)).catch(() => {})
     } catch (e) {
@@ -251,6 +296,95 @@ export default function ScraperPanel({ showToast }) {
               </label>
             ))}
           </div>
+        </div>
+
+        {/* 1b — AI Search Profiles */}
+        <div style={{
+          background: 'var(--surface)',
+          border: '1px solid #1e3a5f',
+          borderRadius: 10, padding: '12px 14px',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <label className="form-label" style={{ marginBottom: 0 }}>
+              AI Search Profiles
+              <span style={{ fontWeight: 400, color: 'var(--text-dim)', textTransform: 'none', letterSpacing: 0, marginLeft: 6 }}>
+                — describe cualquier tipo de negocio
+              </span>
+            </label>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowProfileForm(v => !v)}
+            >
+              {showProfileForm ? 'Cancelar' : '+ Nuevo perfil'}
+            </button>
+          </div>
+
+          {showProfileForm && (
+            <div style={{ marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                className="detail-textarea"
+                placeholder="Nombre del perfil (ej: Hoteles de lujo)"
+                value={newProfileName}
+                onChange={e => setNewProfileName(e.target.value)}
+                style={{ padding: '7px 10px', borderRadius: 6, fontSize: 13 }}
+              />
+              <textarea
+                className="detail-textarea"
+                rows={2}
+                placeholder="Describí el tipo de negocio que buscás (ej: hoteles de lujo con spa en zonas turísticas)"
+                value={newProfileDesc}
+                onChange={e => setNewProfileDesc(e.target.value)}
+                style={{ fontSize: 12 }}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={saveProfile}
+                disabled={creatingProfile || !newProfileName.trim() || !newProfileDesc.trim()}
+                style={{ alignSelf: 'flex-start' }}
+              >
+                {creatingProfile ? <><span className="spinner" style={{ width: 12, height: 12 }} /> Generando query...</> : 'Guardar perfil'}
+              </button>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                Claude va a convertir tu descripción en un query optimizado para Google Places.
+              </div>
+            </div>
+          )}
+
+          {profiles.length === 0 && !showProfileForm && (
+            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              No hay perfiles todavía. Creá uno para buscar cualquier tipo de negocio con lenguaje natural.
+            </div>
+          )}
+
+          {profiles.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {profiles.map(p => {
+                const selected = selectedProfiles.find(x => x.id === p.id)
+                return (
+                  <div key={p.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 4,
+                    background: selected ? '#1e3a5f' : 'var(--surface2)',
+                    border: `1px solid ${selected ? 'var(--gold)' : 'var(--border)'}`,
+                    borderRadius: 6, padding: '4px 8px',
+                  }}>
+                    <span
+                      onClick={() => toggleProfile(p)}
+                      title={`Query: "${p.query}"\n${p.description}`}
+                      style={{ fontSize: 12, cursor: 'pointer', color: selected ? 'var(--gold)' : 'var(--text)', userSelect: 'none' }}
+                    >
+                      {p.name}
+                      <span style={{ fontSize: 10, color: 'var(--text-dim)', marginLeft: 4 }}>({p.query})</span>
+                    </span>
+                    <span
+                      onClick={() => deleteProfile(p.id)}
+                      title="Eliminar perfil"
+                      style={{ fontSize: 10, color: 'var(--text-dim)', cursor: 'pointer', marginLeft: 2 }}
+                    >✕</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* 2 — Countries */}
@@ -487,7 +621,8 @@ export default function ScraperPanel({ showToast }) {
             {running ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Starting...</> : 'Start Search'}
           </button>
           <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-            {selectedCats.length} type{selectedCats.length !== 1 ? 's' : ''}
+            {selectedCats.length + selectedProfiles.length} búsqueda{selectedCats.length + selectedProfiles.length !== 1 ? 's' : ''}
+            {selectedProfiles.length > 0 && ` (${selectedProfiles.length} AI)`}
             {selectedStates.length > 0 && ` · ${selectedStates.length} state${selectedStates.length !== 1 ? 's' : ''}`}
             {!anyCityMode && ` · ${selectedCities.length} city${selectedCities.length !== 1 ? 'ies' : 'y'}`}
             {anyCityMode && statesWithCities.length > 0 && ' · any city'}

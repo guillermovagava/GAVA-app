@@ -95,6 +95,7 @@ STATE_CITIES: dict[str, list[str]] = {
 
 class ScrapeRequest(BaseModel):
     category_label: str
+    query: str | None = None           # direct Places query override (used by AI search profiles)
     states: list[str] = []
     selected_cities: list[str] = []    # if non-empty, only search these cities within the selected states
     custom_locations: list[str] = []   # e.g. ["Miami Beach, FL", "Aspen, CO"]
@@ -137,7 +138,10 @@ async def run_scrape(
 ):
     cat = next((c for c in GOOGLE_CATEGORIES if c["label"] == payload.category_label), None)
     if not cat:
-        return {"error": f"Unknown category: {payload.category_label}"}
+        if payload.query:
+            cat = {"label": payload.category_label, "query": payload.query}
+        else:
+            return {"error": f"Unknown category: {payload.category_label}"}
 
     # Build city-level location list
     locations: list[str] = []
