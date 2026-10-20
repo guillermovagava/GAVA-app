@@ -5,11 +5,12 @@ Hunter.io (or free web scraper as fallback) to find HR emails.
 import asyncio
 import os
 from datetime import datetime
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models import Lead, ScrapeJob
+from services import google_spend
 from services.google_places_service import search_businesses, GOOGLE_CATEGORIES
 from services import google_quota
 
@@ -101,6 +102,41 @@ class ScrapeRequest(BaseModel):
     custom_locations: list[str] = []   # e.g. ["Miami Beach, FL", "Aspen, CO"]
     hunter_credits: int = 0   # max Hunter.io credits to spend on this job (0 = none / default OFF)
     max_results_per_city: int = 20
+    force: bool = False                # run even if the spend limit would be exceeded (UI sends it after confirmation)
+
+
+class EstimateRequest(BaseModel):
+    categories: list[str] = []         # category labels
+    profile_ids: list[int] = []        # AI search profiles (each one is one more search)
+    states: list[str] = []
+    selected_cities: list[str] = []
+    custom_locations: list[str] = []
+    max_results_per_city: int = 20
+
+
+def _build_locations(states: list[str], selected_cities: list[str], custom_locations: list[str]) -> list[str]:
+    """City-level location list for a scrape (shared by /run and /estimate)."""
+    locations: list[str] = []
+    for state in states:
+        all_cities = STATE_CITIES.get(state, [])
+        if selected_cities:
+            # Only use cities the user explicitly chose that belong to this state
+            cities = [c for c in all_cities if c in selected_cities]
+            if not cities:
+                continue  # user selected cities but none match this state — skip
+        else:
+            cities = all_cities  # Any city — use all known cities for this state
+
+        if cities:
+            locations.extend([f"{city}, {state}" for city in cities])
+        else:
+            locations.append(state)  # state has no known cities, search state-level
+
+    # Add custom locations directly
+    for loc in custom_locations:
+        if loc.strip() and loc.strip() not in locations:
+            locations.append(loc.strip())
+    return locations
 
 
 @router.get("/categories")
@@ -143,27 +179,18 @@ async def run_scrape(
         else:
             return {"error": f"Unknown category: {payload.category_label}"}
 
-    # Build city-level location list
-    locations: list[str] = []
-    for state in payload.states:
-        all_cities = STATE_CITIES.get(state, [])
-        if payload.selected_cities:
-            # Only use cities the user explicitly chose that belong to this state
-            cities = [c for c in all_cities if c in payload.selected_cities]
-            if not cities:
-                continue  # user selected cities but none match this state — skip
-        else:
-            cities = all_cities  # Any city — use all known cities for this state
+    locations = _build_locations(payload.states, payload.selected_cities, payload.custom_locations)
 
-        if cities:
-            locations.extend([f"{city}, {state}" for city in cities])
-        else:
-            locations.append(state)  # state has no known cities, search state-level
-
-    # Add custom locations directly
-    for loc in payload.custom_locations:
-        if loc.strip() and loc.strip() not in locations:
-            locations.append(loc.strip())
+    # Spend guard: block the run if its estimated cost pushes the month over GOOGLE_SPEND_LIMIT_USD
+    planned = google_spend.scrape_calls(len(locations), 1, payload.max_results_per_city)
+    est = google_spend.estimate(db, planned)
+    if est["exceeds_limit"] and not payload.force:
+        raise HTTPException(status_code=409, detail={
+            "code": "spend_limit_exceeded",
+            "message": (f"Este scrape costaría ~${est['total_usd']:.2f} y llevaría el mes a ~${est['projected_month_usd']:.2f}, "
+                        f"por encima del límite de ${est['limit_usd']:.2f}."),
+            "estimate": est,
+        })
 
     job = ScrapeJob(
         category=payload.category_label,
@@ -174,8 +201,21 @@ async def run_scrape(
     db.commit()
     db.refresh(job)
 
+    google_spend.reserve(job.id, planned)
     background.add_task(_scrape_task, job.id, cat["query"], locations, payload.hunter_credits, payload.max_results_per_city)
-    return {"job_id": job.id, "status": "started", "locations_queued": len(locations)}
+    return {"job_id": job.id, "status": "started", "locations_queued": len(locations),
+            "estimated_usd": est["total_usd"], "forced": bool(est["exceeds_limit"] and payload.force)}
+
+
+@router.post("/estimate")
+def estimate_scrape(payload: EstimateRequest, db: Session = Depends(get_db)):
+    """Cost estimate BEFORE running: calls per SKU and expected USD (free tier and volume tiers of the month applied)."""
+    locations = _build_locations(payload.states, payload.selected_cities, payload.custom_locations)
+    searches = len(payload.categories) + len(payload.profile_ids)
+    calls = google_spend.scrape_calls(len(locations), searches, payload.max_results_per_city)
+    est = google_spend.estimate(db, calls)
+    return {**est, "locations": len(locations), "searches": searches,
+            "pages_per_location": max(1, -(-payload.max_results_per_city // 20))}
 
 
 @router.get("/jobs")
@@ -274,6 +314,7 @@ async def _scrape_task(job_id: int, query: str, locations: list[str], hunter_cre
             job.finished_at = datetime.utcnow()
             db.commit()
     finally:
+        google_spend.release(job_id)
         db.close()
 
 

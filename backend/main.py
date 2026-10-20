@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from database import engine, Base
 import models  # noqa: F401 — registers all models before create_all
 
-from routers import leads, scraper, email_router, claude_router, search_profiles
+from routers import leads, scraper, email_router, claude_router, search_profiles, google_spend
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
@@ -38,7 +38,46 @@ if not os.getenv("DATABASE_URL"):
             _conn.execute(_text("ALTER TABLE leads ADD COLUMN position TEXT"))
             _conn.commit()
 
-app = FastAPI(title="GAVA Recruitment CRM", version="1.0.0")
+# ── Google billing: one-time legacy counter import + daily sync ──────────────
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
+
+
+async def _billing_sync_loop():
+    """Daily Cloud Billing → google_spend_daily sync (no scheduler dependency: plain asyncio task)."""
+    from database import SessionLocal
+    from services import google_billing
+    await asyncio.sleep(30)
+    while True:
+        try:
+            if google_billing.is_configured():
+                db = SessionLocal()
+                try:
+                    last = google_billing.last_sync(db)
+                    # skip if a deploy restart happens within a day of the previous sync
+                    if last is None or datetime.utcnow() - last.synced_at > timedelta(hours=20):
+                        await asyncio.to_thread(google_billing.sync, db)
+                finally:
+                    db.close()
+        except Exception:
+            pass
+        await asyncio.sleep(24 * 3600)
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    try:
+        from services import google_quota
+        google_quota.import_legacy_file()
+    except Exception:
+        pass
+    task = asyncio.create_task(_billing_sync_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="GAVA Recruitment CRM", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,6 +92,7 @@ app.include_router(scraper.router,         prefix="/api/scraper",         tags=[
 app.include_router(email_router.router,    prefix="/api/email",           tags=["email"])
 app.include_router(claude_router.router,   prefix="/api/claude",          tags=["claude"])
 app.include_router(search_profiles.router, prefix="/api/search-profiles", tags=["search-profiles"])
+app.include_router(google_spend.router,    prefix="/api/google-spend",    tags=["google-spend"])
 
 
 @app.get("/api/health")

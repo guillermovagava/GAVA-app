@@ -111,6 +111,10 @@ export default function ScraperPanel({ showToast }) {
   const [resultsPerCity, setResultsPerCity]       = useState(20)
   const [jobs, setJobs]                           = useState([])
   const [running, setRunning]                     = useState(false)
+  const [estimate, setEstimate]                   = useState(null)   // server-side cost estimate for the current selection
+  const [spend, setSpend]                         = useState(null)   // GET /api/google-spend/summary
+  const [syncingSpend, setSyncingSpend]           = useState(false)
+  const [confirmRun, setConfirmRun]               = useState(null)   // estimate awaiting the user's OK before running
   const pollRef = useRef(null)
 
   useEffect(() => {
@@ -118,8 +122,39 @@ export default function ScraperPanel({ showToast }) {
     axios.get('/api/scraper/status').then(r => setStatus(r.data)).catch(() => {})
     axios.get('/api/scraper/google-quota').then(r => setGoogleQuota(r.data)).catch(() => {})
     axios.get('/api/search-profiles').then(r => setProfiles(r.data)).catch(() => {})
+    loadSpend()
     loadJobs()
   }, [])
+
+  function loadSpend() { axios.get('/api/google-spend/summary').then(r => setSpend(r.data)).catch(() => {}) }
+
+  async function refreshSpend() {
+    setSyncingSpend(true)
+    try { const r = await axios.post('/api/google-spend/sync'); setSpend(r.data.summary) }
+    catch { loadSpend() }
+    finally { setSyncingSpend(false) }
+  }
+
+  function estimatePayload() {
+    return {
+      categories:       selectedCats,
+      profile_ids:      selectedProfiles.map(p => p.id),
+      states:           selectedStates,
+      selected_cities:  selectedCities,
+      custom_locations: parseCustomCities(),
+      max_results_per_city: resultsPerCity,
+    }
+  }
+
+  // Cost estimate (server-side: uses this month's usage, free tier and tiers) — debounced while the user edits the form
+  useEffect(() => {
+    const searches = selectedCats.length + selectedProfiles.length
+    if (searches === 0 || (selectedStates.length === 0 && parseCustomCities().length === 0)) { setEstimate(null); return }
+    const t = setTimeout(() => {
+      axios.post('/api/scraper/estimate', estimatePayload()).then(r => setEstimate(r.data)).catch(() => setEstimate(null))
+    }, 400)
+    return () => clearTimeout(t)
+  }, [selectedCats, selectedProfiles, selectedStates, selectedCities, customCities, resultsPerCity])
 
   useEffect(() => {
     const hasRunning = jobs.some(j => j.status === 'running' || j.status === 'pending')
@@ -234,13 +269,34 @@ export default function ScraperPanel({ showToast }) {
 
     setRunning(true)
     try {
-      const basePayload = {
-        states:           selectedStates,
-        selected_cities:  selectedCities,
-        custom_locations: customLocs,
-        hunter_credits:   hunterCredits,
-        max_results_per_city: resultsPerCity,
-      }
+      // Fresh estimate right before running; ask for confirmation above the warning threshold or the monthly limit
+      const est = (await axios.post('/api/scraper/estimate', estimatePayload())).data
+      setEstimate(est)
+      if (est.exceeds_limit || est.needs_warning) { setConfirmRun(est); return }
+      await runJobs(false)
+    } catch (e) {
+      showToast('Failed to start: ' + errorText(e), 'error')
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  function errorText(e) {
+    const d = e.response?.data?.detail
+    return (typeof d === 'string' ? d : d?.message) || e.message
+  }
+
+  async function runJobs(force) {
+    const customLocs = parseCustomCities()
+    const basePayload = {
+      states:           selectedStates,
+      selected_cities:  selectedCities,
+      custom_locations: customLocs,
+      hunter_credits:   hunterCredits,
+      max_results_per_city: resultsPerCity,
+      force,
+    }
+    try {
       for (const cat of selectedCats) {
         await axios.post('/api/scraper/run', { ...basePayload, category_label: cat })
       }
@@ -251,11 +307,22 @@ export default function ScraperPanel({ showToast }) {
       showToast(`Started ${total} search job${total !== 1 ? 's' : ''}`, 'success')
       loadJobs()
       axios.get('/api/scraper/google-quota').then(r => setGoogleQuota(r.data)).catch(() => {})
+      loadSpend()
     } catch (e) {
-      showToast('Failed to start: ' + (e.response?.data?.detail || e.message), 'error')
-    } finally {
-      setRunning(false)
+      const d = e.response?.data?.detail
+      if (e.response?.status === 409 && d?.code === 'spend_limit_exceeded') {
+        setConfirmRun({ ...d.estimate, blockedMessage: d.message })   // server blocked it: user can still force it
+      } else {
+        showToast('Failed to start: ' + errorText(e), 'error')
+      }
     }
+  }
+
+  async function confirmAndRun() {
+    const est = confirmRun
+    setConfirmRun(null)
+    setRunning(true)
+    try { await runJobs(!!est?.exceeds_limit) } finally { setRunning(false) }
   }
 
   // Which states have a known city list
@@ -282,6 +349,10 @@ export default function ScraperPanel({ showToast }) {
           <QuotaPill used={googleQuota.used} limit={googleQuota.limit} remaining={googleQuota.remaining} month={googleQuota.month} />
         )}
       </div>
+
+      {status.google_places && spend && (
+        <SpendCard spend={spend} onRefresh={refreshSpend} syncing={syncingSpend} />
+      )}
 
       <div className="scraper-form">
 
@@ -576,44 +647,83 @@ export default function ScraperPanel({ showToast }) {
           </div>
         </div>
 
-        {/* Request estimate + start */}
-        {selectedCats.length > 0 && (selectedStates.length > 0 || customLocs.length > 0) && (() => {
-          const est = estimateRequests()
-          const remaining = googleQuota?.remaining ?? Infinity
-          const overQuota = est > remaining
+        {/* Cost estimate (before running) */}
+        {(selectedCats.length > 0 || selectedProfiles.length > 0) && (selectedStates.length > 0 || customLocs.length > 0) && (() => {
+          const est = estimate
+          const calls = est ? Object.values(est.calls).reduce((a, b) => a + b, 0) : estimateRequests()
+          const overLimit = !!est?.exceeds_limit
+          const warn = !!est?.needs_warning
+          const color = overLimit ? '#fca5a5' : warn ? '#fcd34d' : 'var(--gold)'
           return (
             <div style={{
               background: 'var(--surface)',
-              border: `1px solid ${overQuota ? '#7f1d1d' : '#1e3a5f'}`,
+              border: `1px solid ${overLimit ? '#7f1d1d' : warn ? '#92400e' : '#1e3a5f'}`,
               borderRadius: 10, padding: '10px 14px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12,
             }}>
-              <div>
-                <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Requests estimados: </span>
-                <span style={{ fontWeight: 700, fontSize: 14, color: overQuota ? '#fca5a5' : 'var(--gold)' }}>
-                  ~{est.toLocaleString()} requests
+              <div style={{ minWidth: 0 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Costo estimado: </span>
+                <span style={{ fontWeight: 700, fontSize: 14, color }}>
+                  {est ? `~${usd(est.total_usd)}` : '…'}
                 </span>
-                {googleQuota && (
-                  <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 8 }}>
-                    ({googleQuota.remaining.toLocaleString()} disponibles este mes)
-                  </span>
+                <span style={{ fontSize: 11, color: 'var(--text-dim)', marginLeft: 8 }}>
+                  ~{calls.toLocaleString()} requests
+                </span>
+                {est && Object.entries(est.breakdown).map(([sku, b]) => (
+                  <div key={sku} style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    {shortSku(sku)}: {b.calls.toLocaleString()} calls
+                    {' '}({b.free_calls.toLocaleString()} gratis · {b.billable_calls.toLocaleString()} facturables)
+                    {b.priced ? ` → ${usd(b.cost_usd)}` : ' → sin precio configurado'}
+                  </div>
+                ))}
+                {est && Object.entries(est.free_remaining).map(([sku, f]) => f.free_cap != null && (
+                  <div key={sku} style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    Gratis restante {shortSku(sku)}: {f.free_remaining.toLocaleString()} de {f.free_cap.toLocaleString()}
+                  </div>
+                ))}
+                {est && (
+                  <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>
+                    Mes proyectado con este scrape: ~{usd(est.projected_month_usd)} · límite {usd(est.limit_usd)}
+                  </div>
                 )}
-                {overQuota && (
-                  <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 2 }}>
-                    Excede el presupuesto mensual. Reduce ciudades o categorías.
+                {overLimit && (
+                  <div style={{ fontSize: 11, color: '#fca5a5', marginTop: 4 }}>
+                    Supera el límite mensual de gasto. Reduce ciudades o categorías (o confirma ejecutarlo de todos modos).
+                  </div>
+                )}
+                {est?.unpriced_skus?.length > 0 && (
+                  <div style={{ fontSize: 11, color: '#fcd34d', marginTop: 4 }}>
+                    Hay un SKU sin precio en google_pricing.py: el costo real puede ser mayor.
                   </div>
                 )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-dim)', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                {Math.ceil(resultsPerCity / 20)} req/ciudad · {
-                  anyCityMode
-                    ? statesWithCities.flatMap(s => CITIES_BY_STATE[s] || []).length + selectedStates.filter(s => !(CITIES_BY_STATE[s] || []).length).length
-                    : selectedCities.length
-                }{customLocs.length > 0 ? `+${customLocs.length}` : ''} ciudades · {selectedCats.length} cat.
+                {est ? `${est.pages_per_location} req/ciudad · ${est.locations} ubicaciones · ${est.searches} búsq.` : ''}
               </div>
             </div>
           )
         })()}
+
+        {/* Confirmation (estimate above the warning threshold, or the monthly limit) */}
+        {confirmRun && (
+          <div style={{
+            background: 'var(--surface)', border: `1px solid ${confirmRun.exceeds_limit ? '#7f1d1d' : '#92400e'}`,
+            borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8,
+          }}>
+            <div style={{ fontWeight: 600, fontSize: 13, color: confirmRun.exceeds_limit ? '#fca5a5' : '#fcd34d' }}>
+              {confirmRun.exceeds_limit ? 'Este scrape supera el límite mensual de gasto' : 'Confirma el costo de este scrape'}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              {confirmRun.blockedMessage || `Costo estimado ~${usd(confirmRun.total_usd)}. Mes proyectado ~${usd(confirmRun.projected_month_usd)} (límite ${usd(confirmRun.limit_usd)}).`}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary btn-sm" onClick={confirmAndRun}>
+                {confirmRun.exceeds_limit ? 'Ejecutar de todos modos' : 'Confirmar y ejecutar'}
+              </button>
+              <button className="btn btn-secondary btn-sm" onClick={() => setConfirmRun(null)}>Cancelar</button>
+            </div>
+          </div>
+        )}
 
         {/* Start button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -649,6 +759,75 @@ export default function ScraperPanel({ showToast }) {
           <div className="jobs-list">{doneJobs.slice(0, 20).map(j => <JobCard key={j.id} job={j} />)}</div>
         </div>
       )}
+    </div>
+  )
+}
+
+const usd = n => '$' + Number(n || 0).toFixed(2)
+const shortSku = sku => sku.replace('Places API ', '')
+
+function timeAgo(iso) {
+  if (!iso) return null
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (mins < 60) return `hace ${mins} min`
+  const h = Math.round(mins / 60)
+  return h < 48 ? `hace ${h} h` : `hace ${Math.round(h / 24)} días`
+}
+
+// Real Google spend (Cloud Billing) + internal call-counter estimate, free calls left and month-end projection
+function SpendCard({ spend, onRefresh, syncing }) {
+  const real = spend.real
+  const realOk = real.status === 'ok' && real.net_usd != null
+  const near = realOk && real.net_usd >= spend.limit_usd * 0.8
+  const border = near ? '#7f1d1d' : '#1e3a5f'
+  const msg = {
+    not_configured: 'Facturación no conectada (faltan GOOGLE_BILLING_BQ_TABLE / GOOGLE_BILLING_SA_JSON).',
+    pending: 'Aún no se ha sincronizado la facturación.',
+    no_data: real.message || 'Sin datos de facturación todavía.',
+    error: real.message || 'Error al leer la facturación.',
+  }[real.status]
+  const ago = timeAgo(spend.last_sync_at)
+  const free = Object.entries(spend.free_remaining).filter(([, f]) => f.free_cap != null)
+  return (
+    <div style={{
+      background: 'var(--surface)', border: `1px solid ${border}`, borderRadius: 8,
+      padding: '10px 14px', fontSize: 12, marginBottom: 20,
+      display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'flex-start', justifyContent: 'space-between',
+    }}>
+      <div>
+        <div style={{ fontWeight: 600 }}>Gasto Google Places · {spend.month}</div>
+        <div style={{ marginTop: 4 }}>
+          <span style={{ color: 'var(--text-dim)' }}>Real (facturación): </span>
+          {realOk
+            ? <strong style={{ color: near ? '#fca5a5' : 'var(--gold)' }}>{usd(real.net_usd)}</strong>
+            : <span style={{ color: '#fcd34d' }}>{msg}</span>}
+          {realOk && real.credits_usd !== 0 && (
+            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}> ({usd(real.cost_usd)} − {usd(-real.credits_usd)} créditos)</span>
+          )}
+        </div>
+        <div>
+          <span style={{ color: 'var(--text-dim)' }}>Estimado (contador interno): </span>
+          <strong>{usd(spend.internal.estimated_usd)}</strong>
+        </div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 11, marginTop: 2 }}>
+          {ago ? `Facturación actualizada ${ago}` : 'Facturación sin sincronizar'} · precios al {spend.prices_as_of}
+        </div>
+      </div>
+      <div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 11 }}>Gratis restante este mes</div>
+        {free.map(([sku, f]) => (
+          <div key={sku}>{shortSku(sku)}: <strong>{f.free_remaining.toLocaleString()}</strong> / {f.free_cap.toLocaleString()}</div>
+        ))}
+      </div>
+      <div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 11 }}>Proyección cierre de mes</div>
+        <div><strong>{usd(spend.projection.projected_usd)}</strong> <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+          (prom. {usd(spend.projection.daily_avg_usd)}/día · {spend.projection.basis === 'real' ? 'real' : 'estimado'})</span></div>
+        <div style={{ color: 'var(--text-dim)', fontSize: 11 }}>Límite {usd(spend.limit_usd)} · aviso desde {usd(spend.warn_usd)}</div>
+      </div>
+      <button className="btn btn-secondary btn-sm" onClick={onRefresh} disabled={syncing}>
+        {syncing ? 'Actualizando…' : 'Actualizar'}
+      </button>
     </div>
   )
 }

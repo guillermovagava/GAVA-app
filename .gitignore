@@ -15,6 +15,7 @@ backend/*.db
 # Runtime quota tracking (auto-created, resets monthly)
 backend/google_quota.json
 backend/hunter_quota.json
+backend/google_quota.json.migrated
 
 # Node
 node_modules/

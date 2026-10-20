@@ -22,7 +22,11 @@ In production, `build.bat` compiles the React app into `backend/static/` and bun
 | `backend/models.py` | Lead, EmailLog, ScrapeJob SQLAlchemy models |
 | `backend/routers/scraper.py` | Google Places job queue, STATE_CITIES map |
 | `backend/services/google_places_service.py` | Places API calls, GOOGLE_CATEGORIES, quota tracking |
-| `backend/services/google_quota.py` | Monthly request counter (file: `backend/google_quota.json`) |
+| `backend/services/google_usage.py` | Persistent call counter per SKU and month (table `google_api_usage`) |
+| `backend/services/google_pricing.py` | Price table (single source of truth), field mask → SKU, `estimate_cost()` |
+| `backend/services/google_billing.py` | Real spend from the Cloud Billing export (BigQuery → `google_spend_daily`) |
+| `backend/services/google_spend.py` | Summary, pre-scrape estimate and spend-limit gate |
+| `backend/services/google_quota.py` | Compatibility layer for the quota pill (reads the DB; one-time import of the old JSON file) |
 | `backend/services/hunter_quota.py` | Monthly Hunter.io counter (file: `backend/hunter_quota.json`) |
 | `frontend/src/components/Scraper/ScraperPanel.jsx` | Main scraper UI — categories, location picker, quota pill, request estimator |
 
@@ -71,6 +75,8 @@ Any status can also be `archived` (soft delete via `archived=True` flag).
 
 Done inline in `main.py` at startup using raw `ALTER TABLE` with `PRAGMA table_info` guards. No Alembic — keep it simple.
 
-## Quota JSON files
+## Quota files and Google spend
 
-`backend/google_quota.json` and `backend/hunter_quota.json` are auto-created. They track monthly usage and reset on the 1st. These files are gitignored (they contain runtime state, not config).
+`backend/hunter_quota.json` is auto-created and tracks monthly Hunter usage (gitignored). Google Places usage is no longer a file: calls are stored per SKU in the `google_api_usage` table, so they survive deploys. Spend control (estimate before running, monthly limit, real billing) is documented in `docs/GOOGLE_SPEND.md`. Prices live ONLY in `backend/services/google_pricing.py`.
+
+Tests: `cd backend && pip install -r requirements-dev.txt && python -m pytest tests`.

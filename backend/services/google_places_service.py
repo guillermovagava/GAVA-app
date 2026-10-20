@@ -7,9 +7,27 @@ import asyncio
 import httpx
 from services.hunter_service import find_hr_contact as hunter_find
 from services.web_scraper import find_hr_email as scrape_find
-from services import google_quota
+from services import google_usage, google_pricing
 
 PLACES_NEW_BASE = "https://places.googleapis.com/v1"
+
+# Field mask of the Text Search call. The SKU billed depends on the highest field tier requested:
+# nationalPhoneNumber + websiteUri are Enterprise fields → "Places API Text Search Enterprise".
+# (id, displayName, formattedAddress, location, photos are Pro.) See services/google_pricing.py.
+TEXT_SEARCH_FIELD_MASK = (
+    "places.id,"
+    "places.displayName,"
+    "places.formattedAddress,"
+    "places.location,"
+    "places.nationalPhoneNumber,"
+    "places.websiteUri,"
+    "places.photos,"
+    "nextPageToken"
+)
+TEXT_SEARCH_SKU = google_pricing.text_search_sku(TEXT_SEARCH_FIELD_MASK)
+# The scraper does NOT call Place Details today (everything comes from Text Search). If that changes,
+# set this to True and record the calls with google_usage.record_calls(DETAILS_SKU, 1).
+PLACE_DETAILS_PER_BUSINESS = False
 
 GOOGLE_CATEGORIES = [
     {"label": "Hotels & Resorts",        "query": "hotels"},
@@ -78,16 +96,7 @@ async def search_businesses(
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": (
-            "places.id,"
-            "places.displayName,"
-            "places.formattedAddress,"
-            "places.location,"
-            "places.nationalPhoneNumber,"
-            "places.websiteUri,"
-            "places.photos,"
-            "nextPageToken"
-        ),
+        "X-Goog-FieldMask": TEXT_SEARCH_FIELD_MASK,
     }
 
     async with httpx.AsyncClient(timeout=20) as client:
@@ -108,7 +117,7 @@ async def search_businesses(
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                google_quota.increment()
+                google_usage.record_calls(TEXT_SEARCH_SKU, 1)   # one Text Search page = 1 billable call
             except Exception:
                 break
 
