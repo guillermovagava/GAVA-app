@@ -9,6 +9,8 @@ from sqlalchemy import func
 from pydantic import BaseModel
 from database import get_db
 from models import Lead, EmailLog
+from services import google_usage
+from services.google_pricing import DETAILS_PHOTOS
 import io
 
 router = APIRouter()
@@ -356,6 +358,7 @@ async def get_lead_photo(lead_id: int, db: Session = Depends(get_db)):
         resp = await client.get(url)
     if resp.status_code != 200:
         raise HTTPException(status_code=404, detail="Photo not found")
+    google_usage.record_calls(DETAILS_PHOTOS)
     return Response(content=resp.content, media_type=resp.headers.get("content-type", "image/jpeg"))
 
 
