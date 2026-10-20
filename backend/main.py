@@ -13,7 +13,7 @@ else:
     _env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=_env_path)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -70,6 +70,8 @@ if os.path.isdir(_static_dir):
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
         fp = os.path.join(_static_dir, full_path)
         if os.path.isfile(fp):
             return FileResponse(fp)

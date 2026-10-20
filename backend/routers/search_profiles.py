@@ -54,13 +54,13 @@ def _serialize(p: SearchProfile) -> dict:
     }
 
 
-@router.get("/")
+@router.get("")
 def list_profiles(db: Session = Depends(get_db)):
     profiles = db.query(SearchProfile).order_by(SearchProfile.created_at.desc()).all()
     return [_serialize(p) for p in profiles]
 
 
-@router.post("/")
+@router.post("")
 def create_profile(payload: CreateProfileRequest, db: Session = Depends(get_db)):
     query = _generate_query(payload.description)
     profile = SearchProfile(

@@ -111,10 +111,9 @@ export default function MapView({ pins, onSelectPin, selectedPin }) {
         zoomControl={true}
       >
         <TileLayer
-          attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          subdomains="abcd"
-          maxZoom={19}
+          attribution='Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+          url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+          maxZoom={16}
         />
         <PinsLayer pins={pins} onSelect={onSelectPin} selectedId={selectedPin?.id} />
         {selectedPin && <FlyToSelected pin={selectedPin} />}
