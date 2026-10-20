@@ -37,3 +37,5 @@ Edita **solo** `backend/services/google_pricing.py` (`SKUS` y `PRICES_AS_OF`). F
 
 ## Qué SKU usa el scraper hoy
 La máscara de campos de `google_places_service.py` pide `nationalPhoneNumber` y `websiteUri` (campos Enterprise) → **Places API Text Search Enterprise** (1,000 gratis/mes, $35 por 1,000). El scraper no llama a Place Details. Quitar teléfono y sitio web lo bajaría a Text Search Pro (5,000 gratis, $32 por 1,000), pero el sitio web alimenta la búsqueda de emails.
+
+Fuera del scraper, cada vez que se carga la foto de un lead (`/api/leads/{id}/photo`) se cobra una llamada **Places API Place Details Photos** (1,000 gratis/mes, $7 por 1,000). La foto no se guarda, así que abrir el mismo lead dos veces cuenta dos llamadas.

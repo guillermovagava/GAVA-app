@@ -47,6 +47,7 @@ DETAILS_ESSENTIALS = "Places API Place Details Essentials"
 DETAILS_PRO = "Places API Place Details Pro"
 DETAILS_ENTERPRISE = "Places API Place Details Enterprise"
 DETAILS_ENTERPRISE_ATMOSPHERE = "Places API Place Details Enterprise + Atmosphere"
+DETAILS_PHOTOS = "Places API Place Details Photos"   # GET /v1/{photo}/media — used by /api/leads/{id}/photo
 
 _PRO_TIERS = [(100_000, 32.00), (500_000, 25.60), (1_000_000, 19.20), (5_000_000, 9.60), (None, 2.40)]
 
@@ -77,6 +78,8 @@ SKUS: dict[str, dict] = {
         "tiers": [(100_000, 25.00), (500_000, 20.00), (1_000_000, 15.00), (5_000_000, 7.50), (None, 2.28)],
         "tier": "enterprise_atmosphere",
     },
+    # Not in the 2026-10-16 spec list; first tier only — verify on the pricing page.
+    DETAILS_PHOTOS: {"free_cap": 1_000, "tiers": [(None, 7.00)], "tier": "enterprise"},
 }
 
 # ── Field mask → tier ────────────────────────────────────────────────────────────────────────────

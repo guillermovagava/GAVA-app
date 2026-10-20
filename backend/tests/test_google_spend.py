@@ -19,6 +19,21 @@ def client(db, monkeypatch):
     return TestClient(main.app)
 
 
+def test_lead_photo_is_counted_only_when_google_returns_it(client, db, monkeypatch):
+    import httpx
+    from models import Lead
+    db.add_all([Lead(id=1, business_name="A", photo_ref="places/a/photos/1"),
+                Lead(id=2, business_name="B", photo_ref="places/b/photos/1")])
+    db.commit()
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real_client(transport=httpx.MockTransport(
+        lambda req: httpx.Response(200 if "/a/" in req.url.path else 404, content=b"img")), **kw))
+    assert client.get("/api/leads/1/photo").status_code == 200
+    assert client.get("/api/leads/2/photo").status_code == 404
+    assert google_usage.get_month_usage(db=db) == {gp.DETAILS_PHOTOS: 1}
+    assert gp.estimate_cost({}, {gp.DETAILS_PHOTOS: 1500})["total_usd"] == pytest.approx(3.5)
+
+
 # ── persistent counter ───────────────────────────────────────────────────────────────────────────
 def test_counter_persists_per_sku_and_month(db):
     google_usage.record_calls(TEXT_SEARCH_SKU, 1)
